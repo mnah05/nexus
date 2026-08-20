@@ -4,6 +4,8 @@ nexus is a single-binary key-value store. The write path is:
 **HTTP request → WAL append → in-memory map**. Periodically the reverse
 happens for housekeeping: **map → snapshot file → WAL truncated**.
 
+For the reasoning behind the design, see [how-it-works.md](how-it-works.md).
+
 ```
             GET /get, /list
 client ────────────────────────► Store (in-memory map)
@@ -14,6 +16,20 @@ client ────────────────────────�
 ```
 
 ## Files
+
+Per-file deep dives live in their own docs:
+
+| Doc | Covers |
+|---|---|
+| [main.md](main.md) | Entry point and wiring |
+| [kv.md](kv.md) | Core service: WAL-first writes, recovery, snapshots |
+| [store.md](store.md) | In-memory concurrent map |
+| [wal.md](wal.md) | Append-only write-ahead log |
+| [walentry.md](walentry.md) | Log record format |
+| [snapshot.md](snapshot.md) | Atomic snapshot save/load |
+| [http.md](http.md) | HTTP API routes |
+| [store_test.md](store_test.md) | Store test suite |
+| [how-it-works.md](how-it-works.md) | Why the design works the way it does |
 
 ### `main.go`
 Entry point and wiring only. Resolves the WAL path (first CLI arg,
