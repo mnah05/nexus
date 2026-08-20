@@ -30,3 +30,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# nexus runtime data
+wal.log
+*.log.snap
+*.snap.tmp
