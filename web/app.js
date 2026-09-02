@@ -25,6 +25,7 @@
   const terminalLog = document.getElementById('terminalLog');
   const clearConsoleBtn = document.getElementById('clearConsoleBtn');
   const quorumStatusBadge = document.getElementById('quorumStatusBadge');
+  const toastRegion = document.getElementById('toastRegion');
 
   // Stats
   const statKeys = document.getElementById('statKeys');
@@ -75,6 +76,92 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  function notify(type, title, message, duration = 5000) {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `
+      <span class="toast-mark"></span>
+      <div><div class="toast-title">${escapeHtml(title)}</div><div class="toast-message">${escapeHtml(message)}</div></div>
+      <button class="toast-close" type="button" aria-label="Dismiss">x</button>
+    `;
+    const close = () => toast.remove();
+    toast.querySelector('.toast-close').addEventListener('click', close);
+    toastRegion.appendChild(toast);
+    window.setTimeout(close, duration);
+  }
+
+  function askConfirmation(title, message, confirmLabel = 'Continue', danger = false) {
+    return new Promise(resolve => {
+      const backdrop = document.createElement('div');
+      backdrop.className = 'confirm-backdrop';
+      backdrop.innerHTML = `
+        <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+          <h3 id="confirm-title">${escapeHtml(title)}</h3>
+          <p>${escapeHtml(message)}</p>
+          <div class="confirm-actions">
+            <button class="confirm-cancel" type="button">Cancel</button>
+            <button class="confirm-accept${danger ? ' danger' : ''}" type="button">${escapeHtml(confirmLabel)}</button>
+          </div>
+        </div>
+      `;
+      function onKeydown(event) {
+        if (event.key === 'Escape') finish(false);
+      }
+      const finish = result => {
+        document.removeEventListener('keydown', onKeydown);
+        backdrop.remove();
+        resolve(result);
+      };
+      backdrop.querySelector('.confirm-cancel').addEventListener('click', () => finish(false));
+      backdrop.querySelector('.confirm-accept').addEventListener('click', () => finish(true));
+      backdrop.addEventListener('click', event => {
+        if (event.target === backdrop) finish(false);
+      });
+      document.addEventListener('keydown', onKeydown);
+      document.body.appendChild(backdrop);
+      backdrop.querySelector('.confirm-accept').focus();
+    });
+  }
+
+  async function requestNodeAction(port, action) {
+    try {
+      const response = await fetchWithTimeout(`http://localhost:${port}/admin/${action}`, {
+        method: 'POST'
+      }, 1800);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      return data;
+    } catch (directError) {
+      if (action !== 'restart') throw directError;
+
+      // A stopped node cannot receive its own restart request. Ask a surviving
+      // local node to relaunch it when running via make cluster-start.
+      await new Promise(resolve => window.setTimeout(resolve, 900));
+      try {
+        const health = await fetchWithTimeout(`http://localhost:${port}/healthz`, {}, 700);
+        if (health.ok) return { message: 'node restart accepted' };
+      } catch {}
+
+      let lastError = directError;
+      for (const controlPort of clusterPorts) {
+        if (controlPort === port) continue;
+        try {
+          const response = await fetchWithTimeout(`http://localhost:${controlPort}/admin/restart-peer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ port })
+          }, 1800);
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+          return data;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError;
+    }
   }
 
   function detectActivePort() {
@@ -151,6 +238,31 @@
         setTargetNode(`http://localhost:${port}`);
       });
     }
+  });
+
+  // Local scenario controls for taking a node out of the cluster and bringing it back.
+  document.querySelectorAll('.node-control-btn').forEach(button => {
+    button.addEventListener('click', async (event) => {
+      event.stopPropagation();
+
+      const port = button.dataset.port;
+      const action = button.dataset.nodeAction;
+      const label = action === 'restart' ? 'restart' : 'stop';
+      if (!await askConfirmation(`${label} node :${port}?`, 'This is a cluster scenario test.', label, action === 'shutdown')) return;
+
+      button.disabled = true;
+      logEvent('system', `Requesting ${label} for node :${port}...`);
+      try {
+        await requestNodeAction(port, action);
+        logEvent('success', `Node :${port} ${action === 'restart' ? 'is restarting' : 'is shutting down'}.`);
+        notify('success', `Node :${port} ${action}`, action === 'restart' ? 'The node is rejoining the cluster.' : 'The node is leaving the cluster.');
+        setTimeout(refreshAll, 500);
+      } catch (err) {
+        logEvent('error', `Node :${port} ${label} failed: ${err.message}`);
+        notify('error', `Node :${port} ${label} failed`, err.message);
+        button.disabled = false;
+      }
+    });
   });
 
   // Tab Switching
@@ -245,9 +357,9 @@
           termEl.textContent = data.term != null ? data.term : '-';
 
           let displayLeader = data.leader || 'None';
-          if (displayLeader.includes('8001')) displayLeader = 'Node 1 (:8001)';
-          else if (displayLeader.includes('8002')) displayLeader = 'Node 2 (:8002)';
-          else if (displayLeader.includes('8003')) displayLeader = 'Node 3 (:8003)';
+          if (displayLeader.includes('8001')) displayLeader = 'node-01 (:8001)';
+          else if (displayLeader.includes('8002')) displayLeader = 'node-02 (:8002)';
+          else if (displayLeader.includes('8003')) displayLeader = 'node-03 (:8003)';
           leaderEl.textContent = displayLeader;
           pingEl.textContent = `${duration}ms`;
 
@@ -266,13 +378,13 @@
       }
     }
 
-    quorumStatusBadge.textContent = `● ${onlineCount}/3 Nodes Active`;
+    quorumStatusBadge.textContent = `${onlineCount}/3 nodes online`;
     if (onlineCount >= 2) {
-      quorumStatusBadge.style.color = '#34d399';
-      quorumStatusBadge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+      quorumStatusBadge.style.color = '#40d763';
+      quorumStatusBadge.style.borderColor = 'rgba(64, 215, 99, 0.45)';
     } else {
-      quorumStatusBadge.style.color = '#fb7185';
-      quorumStatusBadge.style.borderColor = 'rgba(255, 51, 102, 0.4)';
+      quorumStatusBadge.style.color = '#ff7082';
+      quorumStatusBadge.style.borderColor = 'rgba(255, 112, 130, 0.45)';
     }
   }
 
@@ -294,8 +406,9 @@
       const res = await fetchWithTimeout(`${targetBaseUrl}/metrics`, {}, 1500);
       if (res.ok) {
         const m = await res.json();
-        latencyLabel.textContent = `Connected (: ${detectActivePort()})`;
-        latencyLabel.style.color = '#34d399';
+        latencyLabel.textContent = `live :${detectActivePort()}`;
+        latencyLabel.style.color = '#40d763';
+        livePill.classList.remove('offline');
 
         statKeys.textContent = m.keys_count != null ? m.keys_count : '0';
         statWalIdx.textContent = m.wal_next_index != null ? m.wal_next_index : '1';
@@ -304,8 +417,9 @@
         keyCountBadge.textContent = `${m.keys_count || 0} keys`;
       }
     } catch {
-      latencyLabel.textContent = `Offline (: ${detectActivePort()})`;
-      latencyLabel.style.color = '#fb7185';
+      latencyLabel.textContent = `down :${detectActivePort()}`;
+      latencyLabel.style.color = '#ff7082';
+      livePill.classList.add('offline');
     }
   }
 
@@ -372,7 +486,7 @@
     dataTableBody.querySelectorAll('.btn-row-del').forEach(btn => {
       btn.addEventListener('click', async () => {
         const key = btn.dataset.key;
-        if (confirm(`Delete key "${key}"?`)) {
+        if (await askConfirmation(`Delete key "${key}"?`, 'This operation cannot be undone.', 'Delete', true)) {
           await executeDelete(key);
         }
       });
@@ -410,7 +524,7 @@
       } else {
         if (res.status === 403 && data.error === 'not leader') {
           logEvent('warn', `WRITE REJECTED: Target node is Follower! Active Leader is: ${data.leader}`);
-          alert(`Write Rejected: This node is a Follower (Read Replica).\nCurrent Leader is: ${data.leader}`);
+          notify('warning', 'Write rejected by follower', `Current leader: ${data.leader}`);
         } else {
           logEvent('error', `Write Error (${res.status}): ${data.error || JSON.stringify(data)}`);
         }
@@ -438,7 +552,7 @@
     }
 
     if (!followerPort) {
-      alert('No active follower replicas available right now!');
+      notify('warning', 'No follower available', 'There are no active follower replicas right now.');
       return;
     }
 
@@ -452,7 +566,7 @@
       const data = await res.json();
       if (res.status === 403) {
         logEvent('warn', `Follower (: ${followerPort}) rejected write with HTTP 403! Leader address returned: ${data.leader}`);
-        alert(`Raft Primary-Read Replica Invariant:\n\nFollower :${followerPort} rejected the write with HTTP 403 Forbidden!\nPayload: ${JSON.stringify(data)}\n\nThis validates consensus routing: replicas cannot mutate state!`);
+        notify('success', 'Follower protection verified', `Node :${followerPort} rejected the write with HTTP 403. Leader: ${data.leader || 'unknown'}.`, 7000);
       }
     } catch (err) {
       logEvent('error', `Demonstration failed: ${err.message}`);
@@ -518,7 +632,7 @@
         refreshAll();
       } else {
         logEvent('error', `Delete Error (${res.status}): ${data.error}`);
-        alert(`Delete failed: ${data.error}`);
+        notify('error', 'Delete failed', data.error || 'The delete request was rejected.');
       }
     } catch (err) {
       logEvent('error', `Delete request failed: ${err.message}`);
@@ -533,11 +647,11 @@
       const data = await res.json();
       if (res.ok) {
         logEvent('success', 'SNAPSHOT COMPLETED: In-memory state persisted, WAL truncated.');
-        alert('Snapshot created successfully! State safely compacted on disk.');
+        notify('success', 'Snapshot complete', 'State persisted and the WAL was compacted.');
         refreshAll();
       } else {
         logEvent('error', `Snapshot error: ${data.error}`);
-        alert(`Snapshot failed: ${data.error}`);
+        notify('error', 'Snapshot failed', data.error || 'The snapshot request was rejected.');
       }
     } catch (err) {
       logEvent('error', `Snapshot request failed: ${err.message}`);
@@ -579,6 +693,15 @@
   refreshBtn.addEventListener('click', () => {
     refreshAll();
     logEvent('system', 'Manual refresh triggered.');
+  });
+
+  // Sidebar navigation
+  const navItems = document.querySelectorAll('.nav-item');
+  navItems.forEach(item => {
+    item.addEventListener('click', () => {
+      navItems.forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+    });
   });
 
   // Startup

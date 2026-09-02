@@ -3,412 +3,429 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nexus KV &bull; Distributed Consensus Dashboard</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <meta name="theme-color" content="#111111">
+  <title>Nexus KV &middot; Raft Console</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <!-- Ambient background glow effects -->
-  <div class="ambient-glow glow-1"></div>
-  <div class="ambient-glow glow-2"></div>
-  <div class="grid-overlay"></div>
-
   <div class="app-shell">
-    <!-- Top Navigation Bar -->
-    <header class="top-nav">
-      <div class="nav-left">
-        <div class="brand-badge">
-          <div class="brand-gem">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="side-brand">
+        <span class="logo-mark">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="4.6"/>
+            <circle cx="12" cy="12" r="9.4" opacity="0.45"/>
+            <path d="M3.5 7.5h17M3.5 16.5h17" opacity="0.45"/>
+          </svg>
+        </span>
+        <span class="logo-word">NEXUS<span>KV</span></span>
+      </div>
+
+      <nav class="side-nav">
+        <p class="nav-group">Cluster</p>
+        <a class="nav-item active" href="#sec-cluster">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          Topology
+        </a>
+
+        <p class="nav-group">Data</p>
+        <a class="nav-item" href="#sec-browser">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 5v14c0 1.66-4 3-9 3s-9-1.34-9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
+          Browser
+        </a>
+
+        <p class="nav-group">Query</p>
+        <a class="nav-item" href="#sec-console">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Console
+        </a>
+      </nav>
+
+      <div class="side-foot">
+        <div class="foot-row">
+          <span class="foot-dot"></span>
+          <span>cluster online</span>
+        </div>
+        <p class="foot-sub">localhost:8001 &ndash; :8003</p>
+      </div>
+    </aside>
+
+    <!-- Main column -->
+    <div class="main-col">
+
+      <!-- Page header -->
+      <header class="page-head">
+        <div class="head-left">
+          <h1>Cluster Console</h1>
+          <p class="head-sub">Raft consensus &middot; monotonic WAL &middot; primary-read replicas</p>
+        </div>
+
+        <div class="head-actions">
+          <div class="node-target">
+            <span class="node-label">Target</span>
+            <div class="segmented-control" id="nodeSelector">
+              <button class="segment-btn" data-node="8001"><span class="status-dot"></span>8001</button>
+              <button class="segment-btn" data-node="8002"><span class="status-dot"></span>8002</button>
+              <button class="segment-btn" data-node="8003"><span class="status-dot"></span>8003</button>
+              <button class="segment-btn" data-node="custom" id="customTargetBtn">custom</button>
+            </div>
+          </div>
+          <div class="custom-input-wrapper hidden" id="customInputWrapper">
+            <input type="text" id="customTargetInput" placeholder="host:port" spellcheck="false" />
+            <button id="applyCustomTargetBtn" class="btn btn-ghost btn-xs">apply</button>
+          </div>
+
+          <span class="divider-v"></span>
+
+          <span class="status-chip" id="quorumStatusBadge">3/3 nodes</span>
+
+          <div class="live-pill" id="livePill">
+            <span class="pulse-core"></span>
+            <span class="live-label" id="latencyLabel">connecting</span>
+          </div>
+
+          <button id="refreshBtn" class="icon-action-btn" title="Refresh state (&#8984;R)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
             </svg>
-          </div>
-          <div class="brand-title">
-            <div class="title-row">
-              <span class="logo-name">NEXUS</span>
-              <span class="logo-kv">KV</span>
-              <span class="cluster-badge" id="quorumStatusBadge">● 3/3 Nodes Active</span>
-            </div>
-            <span class="brand-sub">Raft Consensus &bull; Monotonic WAL &bull; Primary-Read Replicas</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Node Target Segmented Control -->
-      <div class="nav-center">
-        <div class="segmented-control" id="nodeSelector">
-          <span class="control-label">Target:</span>
-          <button class="segment-btn active" data-node="8001">
-            <span class="status-dot"></span> Node 1 (:8001)
-          </button>
-          <button class="segment-btn" data-node="8002">
-            <span class="status-dot"></span> Node 2 (:8002)
-          </button>
-          <button class="segment-btn" data-node="8003">
-            <span class="status-dot"></span> Node 3 (:8003)
-          </button>
-          <button class="segment-btn" data-node="custom" id="customTargetBtn">
-            Custom
           </button>
         </div>
-        <div class="custom-input-wrapper hidden" id="customInputWrapper">
-          <input type="text" id="customTargetInput" placeholder="http://localhost:8080" />
-          <button id="applyCustomTargetBtn" class="btn btn-xs">Apply</button>
-        </div>
-      </div>
+      </header>
 
-      <div class="nav-right">
-        <div class="live-pill" id="livePill">
-          <span class="pulse-core"></span>
-          <span class="live-label" id="latencyLabel">Connected</span>
-        </div>
-        <button id="refreshBtn" class="icon-action-btn" title="Refresh state (⌘R)">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-          </svg>
-        </button>
-      </div>
-    </header>
+      <div class="content">
 
-    <!-- Cluster Topology Section -->
-    <section class="topology-section">
-      <div class="section-meta">
-        <div class="meta-title">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-          </svg>
-          <h2>Cluster Consensus Mesh</h2>
-        </div>
-        <div class="meta-tags">
-          <span class="tag">Election Timeout: 150-300ms</span>
-          <span class="tag">Heartbeat: 50ms</span>
-          <span class="tag">Quorum: 2/3</span>
-        </div>
-      </div>
+        <!-- ================= CLUSTER / TOPOLOGY ================= -->
+        <section class="section" id="sec-cluster">
+          <header class="sec-head">
+            <div class="sec-title">
+              <h2>Cluster Topology</h2>
+              <p class="sec-sub">Election 150&ndash;300ms &middot; heartbeat 50ms &middot; quorum 2/3</p>
+            </div>
+            <div class="sec-tags">
+              <span class="tag mono">term-aware</span>
+              <span class="tag mono">read replicas</span>
+            </div>
+          </header>
 
-      <!-- 3 Node Cards Grid -->
-      <div class="node-cards-grid">
-        <!-- Node 1 -->
-        <div class="mesh-card" id="cardNode8001" data-port="8001">
-          <div class="mesh-card-glow"></div>
-          <div class="mesh-header">
-            <div class="mesh-node-id">
-              <span class="beacon"></span>
-              <span class="name">Node 1</span>
-              <span class="port-tag">:8001</span>
-            </div>
-            <div class="role-pill follower" id="badge8001">Follower</div>
-          </div>
-          <div class="mesh-body">
-            <div class="metric-pair">
-              <span class="label">Term</span>
-              <span class="value font-mono" id="term8001">1</span>
-            </div>
-            <div class="metric-pair">
-              <span class="label">Recognized Leader</span>
-              <span class="value font-mono highlight" id="leader8001">-</span>
-            </div>
-            <div class="metric-pair">
-              <span class="label">Replication Ping</span>
-              <span class="value font-mono" id="ping8001">0ms</span>
-            </div>
-          </div>
-          <div class="mesh-footer">
-            <span class="footer-hint">Click card to target this node</span>
-            <span class="indicator-active">Targeted</span>
-          </div>
-        </div>
-
-        <!-- Node 2 -->
-        <div class="mesh-card" id="cardNode8002" data-port="8002">
-          <div class="mesh-card-glow"></div>
-          <div class="mesh-header">
-            <div class="mesh-node-id">
-              <span class="beacon"></span>
-              <span class="name">Node 2</span>
-              <span class="port-tag">:8002</span>
-            </div>
-            <div class="role-pill follower" id="badge8002">Follower</div>
-          </div>
-          <div class="mesh-body">
-            <div class="metric-pair">
-              <span class="label">Term</span>
-              <span class="value font-mono" id="term8002">1</span>
-            </div>
-            <div class="metric-pair">
-              <span class="label">Recognized Leader</span>
-              <span class="value font-mono highlight" id="leader8002">-</span>
-            </div>
-            <div class="metric-pair">
-              <span class="label">Replication Ping</span>
-              <span class="value font-mono" id="ping8002">0ms</span>
-            </div>
-          </div>
-          <div class="mesh-footer">
-            <span class="footer-hint">Click card to target this node</span>
-            <span class="indicator-active">Targeted</span>
-          </div>
-        </div>
-
-        <!-- Node 3 -->
-        <div class="mesh-card" id="cardNode8003" data-port="8003">
-          <div class="mesh-card-glow"></div>
-          <div class="mesh-header">
-            <div class="mesh-node-id">
-              <span class="beacon"></span>
-              <span class="name">Node 3</span>
-              <span class="port-tag">:8003</span>
-            </div>
-            <div class="role-pill follower" id="badge8003">Follower</div>
-          </div>
-          <div class="mesh-body">
-            <div class="metric-pair">
-              <span class="label">Term</span>
-              <span class="value font-mono" id="term8003">1</span>
-            </div>
-            <div class="metric-pair">
-              <span class="label">Recognized Leader</span>
-              <span class="value font-mono highlight" id="leader8003">-</span>
-            </div>
-            <div class="metric-pair">
-              <span class="label">Replication Ping</span>
-              <span class="value font-mono" id="ping8003">0ms</span>
-            </div>
-          </div>
-          <div class="mesh-footer">
-            <span class="footer-hint">Click card to target this node</span>
-            <span class="indicator-active">Targeted</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Stats Ribbon -->
-    <div class="stats-ribbon">
-      <div class="ribbon-card">
-        <span class="ribbon-sub">STORED KEYS</span>
-        <div class="ribbon-val-row">
-          <span class="ribbon-val" id="statKeys">0</span>
-          <span class="ribbon-delta" id="statKeysDelta">in-memory</span>
-        </div>
-      </div>
-      <div class="ribbon-card">
-        <span class="ribbon-sub">WAL NEXT INDEX</span>
-        <div class="ribbon-val-row">
-          <span class="ribbon-val font-mono" id="statWalIdx">1</span>
-          <span class="ribbon-delta success">monotonic</span>
-        </div>
-      </div>
-      <div class="ribbon-card">
-        <span class="ribbon-sub">WRITE OPERATIONS</span>
-        <div class="ribbon-val-row">
-          <span class="ribbon-val" id="statSets">0</span>
-          <span class="ribbon-delta">sets / dels</span>
-        </div>
-      </div>
-      <div class="ribbon-card">
-        <span class="ribbon-sub">READ OPERATIONS</span>
-        <div class="ribbon-val-row">
-          <span class="ribbon-val" id="statGets">0</span>
-          <span class="ribbon-delta">gets / lists</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Main Studio Split -->
-    <div class="studio-grid">
-      <!-- Left Panel: Operations & Controls -->
-      <aside class="studio-panel-left">
-        <!-- Interactive Action Ribbon -->
-        <div class="action-banner">
-          <div class="banner-title">
-            <span class="pill-spark">⚡</span>
-            <strong>Cluster Playground</strong>
-          </div>
-          <div class="action-pills">
-            <button class="pill-btn primary" id="quickNewKeyBtn">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Set Key
-            </button>
-            <button class="pill-btn danger" id="testFollowerWriteBtn" title="Send a mutation to a replica to see Raft 403 leader redirect">
-              ⚡ Test Follower Write (403)
-            </button>
-            <button class="pill-btn outline" id="triggerSnapshotBtn" title="Take immediate atomic snapshot & truncate WAL">
-              📸 Snapshot
-            </button>
-          </div>
-        </div>
-
-        <!-- Workbench Tabs Card -->
-        <div class="glass-container workbench-card">
-          <div class="tab-strip">
-            <button class="tab-btn active" data-tab="tabSet">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-              Set Mutation
-            </button>
-            <button class="tab-btn" data-tab="tabGet">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              Read Key
-            </button>
-            <button class="tab-btn" data-tab="tabConfig">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-              Snapshot Config
-            </button>
-          </div>
-
-          <!-- Tab Content 1: SET Form -->
-          <div class="tab-pane active" id="tabSet">
-            <form id="setForm" class="modern-form">
-              <div class="input-field">
-                <div class="field-header">
-                  <label for="setKey">Key Name</label>
-                  <span class="field-hint">Max 1 KB</span>
+          <div class="node-cards-grid">
+            <!-- Node 1 -->
+            <div class="mesh-card" id="cardNode8001" data-port="8001">
+              <div class="mesh-header">
+                <div class="mesh-node-id">
+                  <span class="beacon"></span>
+                  <span class="name">node-01</span>
+                  <span class="port-tag">:8001</span>
                 </div>
-                <div class="input-wrapper">
-                  <input type="text" id="setKey" placeholder="e.g. users:primary:token" required autocomplete="off" />
+                <span class="role-pill follower" id="badge8001">follower</span>
+              </div>
+              <div class="mesh-body">
+                <div class="metric-pair">
+                  <span class="label">term</span>
+                  <span class="value font-mono" id="term8001">1</span>
+                </div>
+                <div class="metric-pair">
+                  <span class="label">leader</span>
+                  <span class="value font-mono" id="leader8001">-</span>
+                </div>
+                <div class="metric-pair">
+                  <span class="label">replication ping</span>
+                  <span class="value font-mono" id="ping8001">0ms</span>
                 </div>
               </div>
-
-              <div class="input-field">
-                <div class="field-header">
-                  <label for="setVal">Payload Value</label>
-                  <span class="type-detector" id="valTypeBadge">Auto (String / JSON)</span>
+              <div class="mesh-footer">
+                <div class="node-actions">
+                  <button class="node-control-btn stop" data-node-action="shutdown" data-port="8001">stop</button>
+                  <button class="node-control-btn restart" data-node-action="restart" data-port="8001">restart</button>
                 </div>
-                <div class="input-wrapper">
-                  <textarea id="setVal" rows="4" placeholder='e.g. { "cluster": "nexus-01", "active": true }' required></textarea>
+                <span class="indicator-active">targeted</span>
+              </div>
+            </div>
+
+            <!-- Node 2 -->
+            <div class="mesh-card" id="cardNode8002" data-port="8002">
+              <div class="mesh-header">
+                <div class="mesh-node-id">
+                  <span class="beacon"></span>
+                  <span class="name">node-02</span>
+                  <span class="port-tag">:8002</span>
+                </div>
+                <span class="role-pill follower" id="badge8002">follower</span>
+              </div>
+              <div class="mesh-body">
+                <div class="metric-pair">
+                  <span class="label">term</span>
+                  <span class="value font-mono" id="term8002">1</span>
+                </div>
+                <div class="metric-pair">
+                  <span class="label">leader</span>
+                  <span class="value font-mono" id="leader8002">-</span>
+                </div>
+                <div class="metric-pair">
+                  <span class="label">replication ping</span>
+                  <span class="value font-mono" id="ping8002">0ms</span>
                 </div>
               </div>
+              <div class="mesh-footer">
+                <div class="node-actions">
+                  <button class="node-control-btn stop" data-node-action="shutdown" data-port="8002">stop</button>
+                  <button class="node-control-btn restart" data-node-action="restart" data-port="8002">restart</button>
+                </div>
+                <span class="indicator-active">targeted</span>
+              </div>
+            </div>
 
-              <div class="form-submit-row">
-                <button type="submit" class="glow-submit-btn" id="setSubmitBtn">
-                  <span>Execute Write (POST /set)</span>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+            <!-- Node 3 -->
+            <div class="mesh-card" id="cardNode8003" data-port="8003">
+              <div class="mesh-header">
+                <div class="mesh-node-id">
+                  <span class="beacon"></span>
+                  <span class="name">node-03</span>
+                  <span class="port-tag">:8003</span>
+                </div>
+                <span class="role-pill follower" id="badge8003">follower</span>
+              </div>
+              <div class="mesh-body">
+                <div class="metric-pair">
+                  <span class="label">term</span>
+                  <span class="value font-mono" id="term8003">1</span>
+                </div>
+                <div class="metric-pair">
+                  <span class="label">leader</span>
+                  <span class="value font-mono" id="leader8003">-</span>
+                </div>
+                <div class="metric-pair">
+                  <span class="label">replication ping</span>
+                  <span class="value font-mono" id="ping8003">0ms</span>
+                </div>
+              </div>
+              <div class="mesh-footer">
+                <div class="node-actions">
+                  <button class="node-control-btn stop" data-node-action="shutdown" data-port="8003">stop</button>
+                  <button class="node-control-btn restart" data-node-action="restart" data-port="8003">restart</button>
+                </div>
+                <span class="indicator-active">targeted</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stats strip -->
+          <div class="stats-strip">
+            <div class="ribbon-card">
+              <span class="ribbon-sub">stored keys</span>
+              <div class="ribbon-val-row">
+                <span class="ribbon-val font-mono" id="statKeys">0</span>
+                <span class="ribbon-delta">in-memory</span>
+              </div>
+            </div>
+            <div class="ribbon-card">
+              <span class="ribbon-sub">wal next index</span>
+              <div class="ribbon-val-row">
+                <span class="ribbon-val font-mono" id="statWalIdx">1</span>
+                <span class="ribbon-delta ok">monotonic</span>
+              </div>
+            </div>
+            <div class="ribbon-card">
+              <span class="ribbon-sub">writes</span>
+              <div class="ribbon-val-row">
+                <span class="ribbon-val font-mono" id="statSets">0</span>
+                <span class="ribbon-delta">sets / dels</span>
+              </div>
+            </div>
+            <div class="ribbon-card">
+              <span class="ribbon-sub">reads</span>
+              <div class="ribbon-val-row">
+                <span class="ribbon-val font-mono" id="statGets">0</span>
+                <span class="ribbon-delta">gets / lists</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= DATA BROWSER ================= -->
+        <section class="section" id="sec-browser">
+          <header class="sec-head">
+            <div class="sec-title">
+              <h2>Data Browser</h2>
+              <p class="sec-sub">live view of the key&ndash;value store on the target node</p>
+            </div>
+            <div class="grid-actions">
+              <div class="search-input-box">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="searchKeyInput" placeholder="filter keys" autocomplete="off" />
+                <span class="kbd">/</span>
+              </div>
+              <span class="count-pill font-mono" id="keyCountBadge">0 keys</span>
+            </div>
+          </header>
+
+          <div class="panel table-panel">
+            <div class="table-scroll-wrap">
+              <table class="nexus-table" id="dataTable">
+                <thead>
+                  <tr>
+                    <th style="width: 30%;">key</th>
+                    <th style="width: 55%;">value</th>
+                    <th style="width: 15%; text-align: right;">action</th>
+                  </tr>
+                </thead>
+                <tbody id="dataTableBody">
+                  <tr class="empty-state-row">
+                    <td colspan="3">
+                      <div class="empty-state">
+                        <div class="empty-icon">
+                          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                            <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 5v14c0 1.66-4 3-9 3s-9-1.34-9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/>
+                          </svg>
+                        </div>
+                        <p class="empty-title">no keys stored</p>
+                        <span class="empty-sub">run a mutation from the console to populate the store</span>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= CONSOLE ================= -->
+        <section class="section" id="sec-console">
+          <header class="sec-head">
+            <div class="sec-title">
+              <h2>Console</h2>
+              <p class="sec-sub">mutations go through the elected leader; replicas serve reads</p>
+            </div>
+            <div class="action-pills">
+              <button class="pill-btn primary" id="quickNewKeyBtn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Set key
+              </button>
+              <button class="pill-btn danger" id="testFollowerWriteBtn" title="Send a mutation to a replica to see Raft 403 leader redirect">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                Follower write
+              </button>
+              <button class="pill-btn outline" id="triggerSnapshotBtn" title="Take immediate atomic snapshot &amp; truncate WAL">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                Snapshot
+              </button>
+            </div>
+          </header>
+
+          <div class="console-grid">
+            <!-- Workbench: forms -->
+            <div class="glass-container workbench-card">
+              <div class="tab-strip">
+                <button class="tab-btn active" data-tab="tabSet">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  Set mutation
+                </button>
+                <button class="tab-btn" data-tab="tabGet">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  Read key
+                </button>
+                <button class="tab-btn" data-tab="tabConfig">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                  Config
                 </button>
               </div>
-            </form>
-          </div>
 
-          <!-- Tab Content 2: GET Inspector -->
-          <div class="tab-pane" id="tabGet">
-            <div class="modern-form">
-              <div class="input-field">
-                <label for="getKeyInput">Search / Fetch Key</label>
-                <div class="input-row">
-                  <input type="text" id="getKeyInput" placeholder="Enter key..." autocomplete="off" />
-                  <button class="btn btn-primary" id="getBtn">Lookup</button>
-                </div>
-              </div>
-
-              <div id="getResultBox" class="lookup-result hidden">
-                <div class="lookup-header">
-                  <span class="badge-status" id="getStatusCode">200 OK</span>
-                  <span class="lookup-time" id="getTimeTaken">0ms</span>
-                </div>
-                <pre class="code-preview"><code id="getResultContent"></code></pre>
-              </div>
-            </div>
-          </div>
-
-          <!-- Tab Content 3: Snapshot Interval -->
-          <div class="tab-pane" id="tabConfig">
-            <div class="modern-form">
-              <div class="info-alert">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                <span>Snapshots create an atomic copy of current in-memory state and truncate older WAL log entries.</span>
-              </div>
-              <div class="input-field">
-                <label for="snapshotIntervalInput">Automatic Snapshot Interval (Seconds)</label>
-                <span class="field-hint">Set to 0 to disable automated snapshots.</span>
-                <div class="input-row">
-                  <input type="number" id="snapshotIntervalInput" min="0" max="86400" value="0" />
-                  <button class="btn btn-secondary" id="saveIntervalBtn">Update</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      <!-- Right Panel: Data Grid & Activity Console -->
-      <main class="studio-panel-right">
-        <!-- Live Key-Value Table Card -->
-        <div class="glass-container data-grid-card">
-          <div class="grid-header">
-            <div class="grid-title-row">
-              <div class="title-with-pill">
-                <h3>Live Key-Value Store</h3>
-                <span class="count-pill" id="keyCountBadge">0 keys</span>
-              </div>
-              <div class="grid-actions">
-                <div class="search-input-box">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  <input type="text" id="searchKeyInput" placeholder="Filter keys... ( / )" autocomplete="off" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Modern Data Table -->
-          <div class="table-scroll-wrap">
-            <table class="nexus-table" id="dataTable">
-              <thead>
-                <tr>
-                  <th style="width: 32%;">KEY</th>
-                  <th style="width: 53%;">VALUE</th>
-                  <th style="width: 15%; text-align: right;">ACTION</th>
-                </tr>
-              </thead>
-              <tbody id="dataTableBody">
-                <tr class="empty-state-row">
-                  <td colspan="3">
-                    <div class="empty-state">
-                      <div class="empty-icon">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
-                          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
-                          <line x1="6" y1="6" x2="6.01" y2="6"/>
-                          <line x1="6" y1="18" x2="6.01" y2="18"/>
-                        </svg>
-                      </div>
-                      <p class="empty-title">Store is currently empty</p>
-                      <span class="empty-sub">Write a key using the workbench form on the left!</span>
+              <!-- Tab: Set mutation -->
+              <div class="tab-pane active" id="tabSet">
+                <form id="setForm" class="modern-form">
+                  <div class="input-field">
+                    <div class="field-header">
+                      <label for="setKey">Key</label>
+                      <span class="field-hint font-mono">max 1 KB</span>
                     </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+                    <div class="input-wrapper">
+                      <input type="text" id="setKey" placeholder="users:primary:token" required autocomplete="off" spellcheck="false" />
+                    </div>
+                  </div>
 
-        <!-- Terminal Card -->
-        <div class="glass-container terminal-card">
-          <div class="terminal-bar">
-            <div class="terminal-window-buttons">
-              <span class="win-btn close"></span>
-              <span class="win-btn min"></span>
-              <span class="win-btn max"></span>
+                  <div class="input-field">
+                    <div class="field-header">
+                      <label for="setVal">Value</label>
+                      <span class="type-detector font-mono" id="valTypeBadge">auto (string / json)</span>
+                    </div>
+                    <div class="input-wrapper">
+                      <textarea id="setVal" rows="4" placeholder='{ "cluster": "nexus-01", "active": true }' required></textarea>
+                    </div>
+                  </div>
+
+                  <button type="submit" class="btn btn-primary btn-block" id="setSubmitBtn">
+                    Execute write (POST /set)
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                </form>
+              </div>
+
+              <!-- Tab: Read key -->
+              <div class="tab-pane" id="tabGet">
+                <div class="modern-form">
+                  <div class="input-field">
+                    <label for="getKeyInput">Fetch key</label>
+                    <div class="input-row">
+                      <input type="text" id="getKeyInput" placeholder="users:primary:token" autocomplete="off" spellcheck="false" />
+                      <button class="btn btn-primary" id="getBtn">Lookup</button>
+                    </div>
+                  </div>
+
+                  <div id="getResultBox" class="lookup-result hidden">
+                    <div class="lookup-header">
+                      <span class="badge-status font-mono" id="getStatusCode">200 OK</span>
+                      <span class="lookup-time font-mono" id="getTimeTaken">0ms</span>
+                    </div>
+                    <pre class="code-preview"><code id="getResultContent"></code></pre>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tab: Config -->
+              <div class="tab-pane" id="tabConfig">
+                <div class="modern-form">
+                  <div class="info-alert">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    <span>Snapshots create an atomic copy of the in-memory state and truncate older WAL entries.</span>
+                  </div>
+                  <div class="input-field">
+                    <label for="snapshotIntervalInput">Automatic snapshot interval (seconds)</label>
+                    <span class="field-hint font-mono">set to 0 to disable</span>
+                    <div class="input-row">
+                      <input type="number" id="snapshotIntervalInput" min="0" max="86400" value="0" />
+                      <button class="btn btn-ghost" id="saveIntervalBtn">Update</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="terminal-header-title">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-              <span>Activity & Raft Event Stream</span>
+
+            <!-- Terminal -->
+            <div class="glass-container terminal-card">
+              <div class="terminal-bar">
+                <div class="terminal-title">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                  <span>raft event stream</span>
+                </div>
+                <button class="terminal-clear" id="clearConsoleBtn">Clear</button>
+              </div>
+              <div class="terminal-scroll-area" id="terminalLog">
+                <div class="term-line system"><span class="badge">system</span> Nexus console online. Polling cluster nodes.</div>
+              </div>
             </div>
-            <button class="terminal-clear" id="clearConsoleBtn">Clear</button>
           </div>
-          <div class="terminal-scroll-area" id="terminalLog">
-            <div class="term-line system"><span class="badge system">SYSTEM</span> Nexus consensus dashboard online. Connected to cluster nodes.</div>
-          </div>
-        </div>
-      </main>
+        </section>
+
+        <footer class="app-footer">
+          <span>NEXUS KV &middot; raft consensus engine &middot; monotonic wal</span>
+        </footer>
+
+      </div>
     </div>
-
-    <!-- Minimalist Footer -->
-    <footer class="app-footer">
-      <span>Nexus KV &bull; Distributed Consensus &bull; Monotonic WAL Engine</span>
-    </footer>
   </div>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
 
   <script src="/static/app.js"></script>
 </body>
