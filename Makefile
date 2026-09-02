@@ -70,3 +70,15 @@ open-ui: ## Open the Web Dashboard in your default browser
 clean: cluster-clean ## Clean built binaries and local WAL files
 	@rm -f $(BIN) nexus-cluster nexus-server wal.log *.log.snap *.snap.tmp
 	@echo "$(GREEN)Clean complete.$(RESET)"
+
+docker-up: ## Start the 3-node cluster using Docker Compose
+	@echo "$(CYAN)Building and starting Nexus cluster with Docker Compose...$(RESET)"
+	@docker compose up -d --build
+	@echo "$(GREEN)Cluster launched via Docker Compose!$(RESET)"
+	@echo "$(YELLOW)Nodes exposed on :8001, :8002, :8003. Open http://localhost:8001$(RESET)"
+
+docker-down: ## Stop Docker Compose cluster and remove containers
+	@echo "$(YELLOW)Stopping Docker Compose cluster...$(RESET)"
+	@docker compose down
+	@echo "$(GREEN)Docker containers stopped.$(RESET)"
+

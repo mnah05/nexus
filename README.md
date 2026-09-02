@@ -28,8 +28,28 @@ The repository includes a comprehensive `Makefile` to build, run, and test singl
 | `make open-ui` | Opens the embedded Web Dashboard at `http://localhost:8001` in your browser |
 | `make cluster-stop` | Gracefully stops all running cluster nodes |
 | `make cluster-clean` | Stops the cluster and clears temporary cluster WAL logs |
+| `make docker-up` | Launches the 3-node cluster using **Docker Compose** |
+| `make docker-down` | Stops and tears down the Docker Compose cluster |
 | `make test` | Runs the full unit & concurrency test suite with `-race` enabled |
 | `make clean` | Cleans built binaries and local WAL files |
+
+---
+
+### Running with Docker Compose
+
+You can also launch the 3-node cluster with container isolation via Docker Compose:
+```sh
+# Start cluster
+docker compose up -d --build
+# or
+make docker-up
+
+# Stop cluster
+docker compose down
+# or
+make docker-down
+```
+Nodes will be accessible on `localhost:8001`, `localhost:8002`, and `localhost:8003` with individual named volumes for persistent data.
 
 ---
 

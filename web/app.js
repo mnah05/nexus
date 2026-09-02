@@ -178,7 +178,11 @@
           badge.textContent = role;
           badge.className = `role-badge ${role.toLowerCase()}`;
           termEl.textContent = data.term != null ? data.term : '-';
-          leaderEl.textContent = data.leader || 'None';
+          let displayLeader = data.leader || 'None';
+          if (displayLeader.includes('8001')) displayLeader = 'Node 1 (:8001)';
+          else if (displayLeader.includes('8002')) displayLeader = 'Node 2 (:8002)';
+          else if (displayLeader.includes('8003')) displayLeader = 'Node 3 (:8003)';
+          leaderEl.textContent = displayLeader;
           pingEl.textContent = `${duration}ms`;
         } else {
           markNodeOffline(card, badge, termEl, leaderEl, pingEl);
