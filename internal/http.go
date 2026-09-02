@@ -10,6 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"mnah/nexus/web"
 )
 
 const (
@@ -79,15 +81,43 @@ func SlogLoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// CORSMiddleware allows cross-origin requests so the web dashboard can communicate across cluster ports.
+func CORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // NewRouter wires the HTTP API backed by the KV service and optional Raft node.
 func NewRouter(kv *KV, raftNode *Node) http.Handler {
 	r := chi.NewRouter()
 
 	// Core middlewares
+	r.Use(CORSMiddleware)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(MetricsMiddleware)
 	r.Use(SlogLoggingMiddleware)
+
+	// Web UI embedded static files and root page
+	fileServer := http.FileServer(http.FS(web.Files))
+	r.Handle("/static/*", http.StripPrefix("/static/", fileServer))
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		indexData, err := web.Files.ReadFile("index.html")
+		if err != nil {
+			http.Error(w, "index.html not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(indexData)
+	})
 
 	// Profiling endpoints at /debug/pprof
 	r.Mount("/debug", middleware.Profiler())

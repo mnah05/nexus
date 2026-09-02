@@ -1,69 +1,46 @@
-# Raft Roadmap
+# Raft Consensus & Cluster Roadmap
 
-Plan for adding basic Raft consensus to nexus, in phases. Phase 1 is the
-current focus; Phase 2 items are deferred until election + replication work.
+This roadmap tracks the design and milestone delivery for Raft consensus, durability, and replication in Nexus KV.
 
-## Current state (what's ready)
+---
 
-- `WALEntry` already has `Idx` + `Term` fields → Raft RPC payloads map directly
-  onto this struct (`internal/walentry.go`)
-- `WAL.ReadAll()` gives the full log for `lastLogTerm` / prefix matching
-- `store.Set` / `store.Del` reusable as "apply on commit"
-- Single-package layout and chi-only deps keep things simple
+## Milestone Status Overview
 
-## Hard rules from day one
+- [x] **Milestone 1: Production Lifecycle & Durability Engine**
+  - [x] Monotonic indices across WAL truncations and snapshots.
+  - [x] Non-blocking atomic snapshotting with background worker decoupling.
+  - [x] Monotonic recovery preserving WAL next index across node restarts.
+  - [x] JSON standardized endpoints, input sanitization, and structured logging.
 
-- **Terms and indices are monotonic** — never reuse or reset them.
-- **Discovery cleanup ≠ membership change.** Removing a dead node from the peer
-  DB affects who you *dial*, never who counts toward *majority* (Phase 1 keeps
-  the voting set static).
-- **A higher term seen anywhere → become follower immediately.**
+- [x] **Milestone 2: Raft Leader Election Engine**
+  - [x] `NodeState` roles: Follower, Candidate, Leader.
+  - [x] Randomized election timer (150ms–300ms) with background goroutine.
+  - [x] Candidate election flow with parallel `RequestVote` RPC broadcasts.
+  - [x] Quorum calculation ($\ge \lfloor N/2 \rfloor + 1$) for election victory.
+  - [x] Immediate step-down to Follower upon seeing any higher term.
+  - [x] Periodic 50ms heartbeat loop to suppress follower coup attempts.
 
-## Phase 1 — Core consensus (current focus)
+- [x] **Milestone 3: Primary-Read Replica Routing & Log Replication**
+  - [x] Followers reject mutations with HTTP `403 Forbidden` and return current leader's address.
+  - [x] Reads (`GET /get`, `GET /list`) served by both Leader and Read Replicas.
+  - [x] Leader replicates mutations (`POST /set`, `POST /del`) inside `AppendEntriesArgs.Entries`.
+  - [x] Followers write replicated entries to their local WAL and apply to memory.
+  - [x] Automated failover in ~200ms when leader crashes; revived leader steps down cleanly.
 
-### 1. Leader election (RequestVote)
+- [x] **Milestone 4: Embedded Web Dashboard & Tooling**
+  - [x] Embedded Vanilla HTML/CSS/JS Single Page Application via `embed.FS`.
+  - [x] Live 3-node cluster topology visualizer with real-time roles, terms, and ping latencies.
+  - [x] Interactive Key-Value explorer (search, live table, insert form, delete).
+  - [x] Raft failover and write-rejection demonstration playground.
+  - [x] Comprehensive `Makefile` for single-command cluster management.
 
-- Election timeout; restart timer on valid heartbeat from current leader
-- RPC: `RequestVote(term, candidateId, lastLogIdx, lastLogTerm)`
-- Grant vote only if candidate's log is at least as up-to-date
-  (compare lastLogTerm, then lastLogIdx)
-- One vote per term per node (persisted ideally; in-memory OK to start)
+---
 
-### 2. Log replication (AppendEntries)
+## Future Enhancements (Phase 3)
 
-- Heartbeats double as log shipping — one RPC does both
-- Consistency check: `prevLogIndex` / `prevLogTerm` must match follower's log
-- Conflict resolution: leader decrements `nextIndex` on mismatch, then sends
-  entries that overwrite any conflicting suffix on the follower
-- Commit advance: majority of acks → bump `commitIndex` → apply to state machine
-
-### 3. Build & test order
-
-1. **Single node**: elect self immediately, append locally, commit instantly
-2. **2–3 nodes**: elections + heartbeats survive `kill -9`
-3. **Conflict scenario**: kill a leader mid-write, restart it, watch logs
-   reconcile — this is where the algorithm's design makes sense
-
-## Phase 2 — After core works (each independently shippable)
-
-1. **Durability** — fsync on WAL append; monotonic indices (stop resetting
-   `nextIdx` to 1 on snapshot truncate)
-2. **Snapshots + compaction** — add last-included-index/term metadata;
-   InstallSnapshot RPC for lagging nodes
-3. **Peer discovery polish** — DB registration (upsert by node ID),
-   TTL cleanup of dead peers, no elections until expected peer count registers
-4. **Client UX** — redirect/forward writes arriving at a follower to the leader
-
-## Peer discovery design (agreed approach)
-
-- New node upserts its address into a shared DB at startup
-- Nodes read other addresses from that DB
-- A separate checker program (or embedded TTL heartbeat) prunes crashed nodes
-- Pruned nodes are only removed from *discovery*, not from the voting set
-
-## Known limitations accepted during Phase 1
-
-- No fsync → commits are not crash-safe
-- Periodic snapshots truncate the whole log and reset indices — disable them
-  once clustered
-- Static voting configuration; dynamic membership reconfiguration is future work
+1. **Strict Quorum Commit Gate**:
+   - Delay returning HTTP 200 to client until majority of followers have acknowledged the append RPC.
+2. **InstallSnapshot RPC**:
+   - Stream snapshot chunks to lagging nodes that join after WAL truncation.
+3. **Dynamic Cluster Reconfiguration**:
+   - Joint consensus protocol for dynamically adding/removing nodes at runtime.

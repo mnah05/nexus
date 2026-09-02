@@ -384,3 +384,32 @@ func TestRaftHTTPFollowerRejectionAndLeaderAcceptance(t *testing.T) {
 	}
 }
 
+func TestHTTPWebUIServing(t *testing.T) {
+	_, router := setupTestServer(t)
+
+	// 1. GET / should return index.html
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on /, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("expected text/html content-type on /, got %s", ct)
+	}
+	if !strings.Contains(rec.Body.String(), "Nexus") {
+		t.Fatalf("expected index.html content on /")
+	}
+
+	// 2. GET /static/app.css should return CSS
+	req = httptest.NewRequest(http.MethodGet, "/static/app.css", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on /static/app.css, got %d", rec.Code)
+	}
+}
+
+

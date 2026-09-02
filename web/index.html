@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexus KV & Raft Cluster Explorer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Header -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="logo-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>Nexus <span>KV</span></h1>
+          <span class="version-tag">Raft Consensus v2</span>
+        </div>
+      </div>
+
+      <!-- Target Node Switcher -->
+      <div class="target-node-bar">
+        <span class="target-label">Target Node:</span>
+        <div class="node-pills" id="nodePills">
+          <button class="node-pill active" data-node="8001">Node 1 (:8001)</button>
+          <button class="node-pill" data-node="8002">Node 2 (:8002)</button>
+          <button class="node-pill" data-node="8003">Node 3 (:8003)</button>
+          <button class="node-pill" data-node="custom">Custom</button>
+        </div>
+        <input type="text" id="customTargetInput" class="custom-node-input hidden" placeholder="http://localhost:8080" />
+      </div>
+
+      <div class="header-actions">
+        <span class="pulse-indicator" id="clusterHealthIndicator"></span>
+        <span class="health-text" id="clusterHealthText">Connecting...</span>
+        <button id="refreshBtn" class="btn btn-icon" title="Refresh state">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6"></path>
+            <path d="M1 20v-6h6"></path>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Cluster Overview Cards -->
+    <section class="cluster-section">
+      <div class="section-title-row">
+        <h2>Raft Cluster Topology</h2>
+        <span class="badge" id="clusterModeBadge">3-Node Cluster</span>
+      </div>
+      <div class="cluster-grid" id="clusterGrid">
+        <!-- Node 1 Card -->
+        <div class="node-card" id="cardNode8001" data-port="8001">
+          <div class="card-header">
+            <div class="node-title">
+              <span class="node-dot"></span>
+              <strong>Node 1 (:8001)</strong>
+            </div>
+            <span class="role-badge follower" id="badge8001">Loading...</span>
+          </div>
+          <div class="card-metrics">
+            <div class="metric-row"><span>Term:</span> <strong id="term8001">-</strong></div>
+            <div class="metric-row"><span>Leader:</span> <strong id="leader8001">-</strong></div>
+            <div class="metric-row"><span>Ping:</span> <strong id="ping8001">-</strong></div>
+          </div>
+        </div>
+
+        <!-- Node 2 Card -->
+        <div class="node-card" id="cardNode8002" data-port="8002">
+          <div class="card-header">
+            <div class="node-title">
+              <span class="node-dot"></span>
+              <strong>Node 2 (:8002)</strong>
+            </div>
+            <span class="role-badge follower" id="badge8002">Loading...</span>
+          </div>
+          <div class="card-metrics">
+            <div class="metric-row"><span>Term:</span> <strong id="term8002">-</strong></div>
+            <div class="metric-row"><span>Leader:</span> <strong id="leader8002">-</strong></div>
+            <div class="metric-row"><span>Ping:</span> <strong id="ping8002">-</strong></div>
+          </div>
+        </div>
+
+        <!-- Node 3 Card -->
+        <div class="node-card" id="cardNode8003" data-port="8003">
+          <div class="card-header">
+            <div class="node-title">
+              <span class="node-dot"></span>
+              <strong>Node 3 (:8003)</strong>
+            </div>
+            <span class="role-badge follower" id="badge8003">Loading...</span>
+          </div>
+          <div class="card-metrics">
+            <div class="metric-row"><span>Term:</span> <strong id="term8003">-</strong></div>
+            <div class="metric-row"><span>Leader:</span> <strong id="leader8003">-</strong></div>
+            <div class="metric-row"><span>Ping:</span> <strong id="ping8003">-</strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Workspace: Left (Operations) & Right (Store & Console) -->
+    <main class="workspace-grid">
+      <!-- Left Column: Operations & Maintenance -->
+      <div class="column-ops">
+        <!-- Set / Mutate Card -->
+        <div class="glass-card">
+          <div class="card-title">
+            <h3>Set Key-Value</h3>
+            <span class="hint">Mutations go to Primary</span>
+          </div>
+          <form id="setForm" class="form">
+            <div class="form-group">
+              <label for="setKey">Key</label>
+              <input type="text" id="setKey" placeholder="e.g. user:100" required autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label for="setVal">Value</label>
+              <textarea id="setVal" rows="3" placeholder="e.g. { &quot;name&quot;: &quot;Alice&quot; } or plain text" required></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="setSubmitBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                Write (POST /set)
+              </button>
+              <button type="button" class="btn btn-outline" id="testFollowerWriteBtn" title="Test write to a follower to see 403 leader redirect">
+                ⚡ Test Follower Write
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Get Query Card -->
+        <div class="glass-card">
+          <div class="card-title">
+            <h3>Get Key</h3>
+            <span class="hint">Read from any Replica</span>
+          </div>
+          <div class="form-row">
+            <input type="text" id="getKeyInput" placeholder="Enter key to lookup..." autocomplete="off" />
+            <button class="btn btn-secondary" id="getBtn">Query</button>
+          </div>
+          <div id="getResultBox" class="result-box hidden">
+            <div class="result-header">
+              <span class="status-code" id="getStatusCode">200 OK</span>
+              <span class="time-taken" id="getTimeTaken">0ms</span>
+            </div>
+            <pre><code id="getResultContent"></code></pre>
+          </div>
+        </div>
+
+        <!-- Snapshot & Compaction Card -->
+        <div class="glass-card">
+          <div class="card-title">
+            <h3>Snapshot & Maintenance</h3>
+          </div>
+          <div class="snapshot-controls">
+            <button class="btn btn-outline" id="triggerSnapshotBtn">
+              📸 Trigger Snapshot & Compaction
+            </button>
+            <div class="interval-setter">
+              <label for="snapshotIntervalInput">Interval (seconds, 0 = disabled):</label>
+              <div class="form-row">
+                <input type="number" id="snapshotIntervalInput" min="0" max="86400" value="0" />
+                <button class="btn btn-secondary" id="saveIntervalBtn">Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Observability Quick Stats -->
+        <div class="glass-card">
+          <div class="card-title">
+            <h3>Operational Metrics</h3>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-box">
+              <span class="stat-label">Total Keys</span>
+              <span class="stat-value" id="statKeys">0</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">WAL Next Idx</span>
+              <span class="stat-value" id="statWalIdx">1</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Total Sets</span>
+              <span class="stat-value" id="statSets">0</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Total Gets</span>
+              <span class="stat-value" id="statGets">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Live Data Table & Activity Terminal -->
+      <div class="column-data">
+        <!-- Live Store Data Table -->
+        <div class="glass-card data-card">
+          <div class="card-title">
+            <div class="title-with-badge">
+              <h3>Live Key-Value Store</h3>
+              <span class="count-badge" id="keyCountBadge">0 keys</span>
+            </div>
+            <div class="search-box">
+              <input type="text" id="searchKeyInput" placeholder="Filter keys..." autocomplete="off" />
+            </div>
+          </div>
+          <div class="table-container">
+            <table class="data-table" id="dataTable">
+              <thead>
+                <tr>
+                  <th style="width: 35%;">Key</th>
+                  <th style="width: 50%;">Value</th>
+                  <th style="width: 15%; text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="dataTableBody">
+                <tr class="empty-row">
+                  <td colspan="3">No keys in store yet. Use the form on the left to write one!</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Live Activity Terminal -->
+        <div class="glass-card terminal-card">
+          <div class="card-title terminal-header">
+            <div class="terminal-dots">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+            </div>
+            <span class="terminal-title">Live Activity & Cluster Events</span>
+            <button class="clear-btn" id="clearConsoleBtn">Clear</button>
+          </div>
+          <div class="terminal-body" id="terminalLog">
+            <div class="log-line info"><span class="timestamp">[SYSTEM]</span> Nexus Web Client initialized. Connected to cluster.</div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span>Nexus KV &bull; Distributed Primary-Read Replica Consensus Engine &bull; Pure Go & Raft</span>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
