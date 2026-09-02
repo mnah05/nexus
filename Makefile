@@ -57,7 +57,7 @@ cluster-status: ## Check the Raft role, term, and leader across all 3 nodes
 
 cluster-stop: ## Gracefully terminate all running cluster nodes
 	@echo "$(YELLOW)Stopping running Nexus nodes...$(RESET)"
-	@-pkill -f $(BIN) 2>/dev/null && echo "$(GREEN)All cluster nodes stopped.$(RESET)" || echo "No nodes were running."
+	@-pkill -f "nexus-" 2>/dev/null && echo "$(GREEN)All cluster nodes stopped.$(RESET)" || echo "No nodes were running."
 
 cluster-clean: cluster-stop ## Stop cluster and remove all temporary cluster WAL files
 	@rm -rf /tmp/nexus_cluster
