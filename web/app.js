@@ -1,25 +1,30 @@
-// Nexus KV & Raft Cluster Client Engine
+// Nexus KV & Raft Cluster Client Engine v2
 (function() {
   'use strict';
 
   // State
   let targetBaseUrl = window.location.origin;
-  if (!targetBaseUrl || targetBaseUrl === 'null') {
+  if (!targetBaseUrl || targetBaseUrl === 'null' || targetBaseUrl.includes('file:')) {
     targetBaseUrl = 'http://localhost:8001';
   }
   
   const clusterPorts = ['8001', '8002', '8003'];
   let currentKeysMap = {};
-  let pollInterval = null;
+  let lastLeaderPort = null;
 
   // DOM Elements
-  const nodePills = document.querySelectorAll('.node-pill');
+  const segmentBtns = document.querySelectorAll('.segment-btn');
+  const customTargetBtn = document.getElementById('customTargetBtn');
+  const customInputWrapper = document.getElementById('customInputWrapper');
   const customInput = document.getElementById('customTargetInput');
-  const healthIndicator = document.getElementById('clusterHealthIndicator');
-  const healthText = document.getElementById('clusterHealthText');
+  const applyCustomTargetBtn = document.getElementById('applyCustomTargetBtn');
+
+  const livePill = document.getElementById('livePill');
+  const latencyLabel = document.getElementById('latencyLabel');
   const refreshBtn = document.getElementById('refreshBtn');
   const terminalLog = document.getElementById('terminalLog');
   const clearConsoleBtn = document.getElementById('clearConsoleBtn');
+  const quorumStatusBadge = document.getElementById('quorumStatusBadge');
 
   // Stats
   const statKeys = document.getElementById('statKeys');
@@ -28,10 +33,16 @@
   const statGets = document.getElementById('statGets');
   const keyCountBadge = document.getElementById('keyCountBadge');
 
+  // Tabs
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabPanes = document.querySelectorAll('.tab-pane');
+  const quickNewKeyBtn = document.getElementById('quickNewKeyBtn');
+
   // Forms
   const setForm = document.getElementById('setForm');
   const setKeyInput = document.getElementById('setKey');
   const setValInput = document.getElementById('setVal');
+  const valTypeBadge = document.getElementById('valTypeBadge');
   const testFollowerWriteBtn = document.getElementById('testFollowerWriteBtn');
 
   const getKeyInput = document.getElementById('getKeyInput');
@@ -49,11 +60,11 @@
   const dataTableBody = document.getElementById('dataTableBody');
 
   // Helper: Append log line to terminal
-  function logEvent(type, message) {
+  function logEvent(badgeType, message) {
     const line = document.createElement('div');
-    line.className = `log-line ${type}`;
-    const now = new Date().toLocaleTimeString();
-    line.innerHTML = `<span class="timestamp">[${now}]</span> ${escapeHtml(message)}`;
+    line.className = `term-line ${badgeType}`;
+    const badgeText = badgeType.toUpperCase();
+    line.innerHTML = `<span class="badge ${badgeType}">${escapeHtml(badgeText)}</span> ${escapeHtml(message)}`;
     terminalLog.appendChild(line);
     terminalLog.scrollTop = terminalLog.scrollHeight;
   }
@@ -66,7 +77,6 @@
       .replace(/"/g, '&quot;');
   }
 
-  // Determine current active port from targetBaseUrl
   function detectActivePort() {
     try {
       const u = new URL(targetBaseUrl);
@@ -76,18 +86,18 @@
     }
   }
 
-  // Update target node selection
+  // Set active target node
   function setTargetNode(url) {
     targetBaseUrl = url.replace(/\/+$/, '');
     const activePort = detectActivePort();
     
-    nodePills.forEach(pill => {
-      if (pill.dataset.node === activePort) {
-        pill.classList.add('active');
-      } else if (pill.dataset.node === 'custom' && !clusterPorts.includes(activePort)) {
-        pill.classList.add('active');
+    segmentBtns.forEach(btn => {
+      if (btn.dataset.node === activePort) {
+        btn.classList.add('active');
+      } else if (btn.dataset.node === 'custom' && !clusterPorts.includes(activePort)) {
+        btn.classList.add('active');
       } else {
-        pill.classList.remove('active');
+        btn.classList.remove('active');
       }
     });
 
@@ -95,54 +105,107 @@
       const card = document.getElementById(`cardNode${port}`);
       if (card) {
         if (port === activePort) {
-          card.classList.add('active-target');
+          card.classList.add('targeted');
         } else {
-          card.classList.remove('active-target');
+          card.classList.remove('targeted');
         }
       }
     });
 
-    logEvent('info', `Target node changed to: ${targetBaseUrl}`);
+    logEvent('system', `Target changed to: ${targetBaseUrl}`);
     refreshAll();
   }
 
-  // Initialize node picker
-  nodePills.forEach(pill => {
-    pill.addEventListener('click', () => {
-      const nodeType = pill.dataset.node;
+  // Segmented control click handlers
+  segmentBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const nodeType = btn.dataset.node;
       if (nodeType === 'custom') {
-        customInput.classList.remove('hidden');
-        customInput.focus();
+        customInputWrapper.classList.toggle('hidden');
+        if (!customInputWrapper.classList.contains('hidden')) {
+          customInput.focus();
+        }
       } else {
-        customInput.classList.add('hidden');
+        customInputWrapper.classList.add('hidden');
         setTargetNode(`http://localhost:${nodeType}`);
       }
     });
   });
 
-  customInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      let val = customInput.value.trim();
+  applyCustomTargetBtn.addEventListener('click', () => {
+    let val = customInput.value.trim();
+    if (val) {
       if (!val.startsWith('http://') && !val.startsWith('https://')) {
         val = 'http://' + val;
       }
       setTargetNode(val);
+      customInputWrapper.classList.add('hidden');
     }
+  });
+
+  // Clicking directly on node card selects it!
+  clusterPorts.forEach(port => {
+    const card = document.getElementById(`cardNode${port}`);
+    if (card) {
+      card.addEventListener('click', () => {
+        setTargetNode(`http://localhost:${port}`);
+      });
+    }
+  });
+
+  // Tab Switching
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabPanes.forEach(p => p.classList.remove('active'));
+
+      btn.classList.add('active');
+      const targetPane = document.getElementById(btn.dataset.tab);
+      if (targetPane) targetPane.classList.add('active');
+    });
+  });
+
+  quickNewKeyBtn.addEventListener('click', () => {
+    const setTabBtn = document.querySelector('[data-tab="tabSet"]');
+    if (setTabBtn) setTabBtn.click();
+    setKeyInput.focus();
+  });
+
+  // Value type detector
+  setValInput.addEventListener('input', () => {
+    const val = setValInput.value.trim();
+    if (!val) {
+      valTypeBadge.textContent = 'Auto (String / JSON)';
+      return;
+    }
+    if ((val.startsWith('{') && val.endsWith('}')) || (val.startsWith('[') && val.endsWith(']'))) {
+      try {
+        JSON.parse(val);
+        valTypeBadge.textContent = 'JSON Object';
+        return;
+      } catch {}
+    }
+    valTypeBadge.textContent = `String (${val.length} bytes)`;
   });
 
   clearConsoleBtn.addEventListener('click', () => {
     terminalLog.innerHTML = '';
   });
 
-  // Fetch with timeout
+  // Keyboard shortcut: pressing / focuses search input
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      searchKeyInput.focus();
+    }
+  });
+
+  // Fetch with timeout helper
   async function fetchWithTimeout(url, options = {}, timeoutMs = 2500) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-      });
+      const response = await fetch(url, { ...options, signal: controller.signal });
       clearTimeout(id);
       return response;
     } catch (err) {
@@ -153,6 +216,7 @@
 
   // Poll cluster nodes status
   async function pollClusterNodes() {
+    let onlineCount = 0;
     for (const port of clusterPorts) {
       const start = performance.now();
       const nodeUrl = `http://localhost:${port}`;
@@ -167,39 +231,58 @@
         const duration = Math.round(performance.now() - start);
 
         if (res.ok) {
+          onlineCount++;
           const data = await res.json();
           const role = data.role || 'Follower';
-          
-          card.className = `node-card ${role.toLowerCase()}`;
+
+          card.className = `mesh-card ${role.toLowerCase()}`;
           if (port === detectActivePort()) {
-            card.classList.add('active-target');
+            card.classList.add('targeted');
           }
 
           badge.textContent = role;
-          badge.className = `role-badge ${role.toLowerCase()}`;
+          badge.className = `role-pill ${role.toLowerCase()}`;
           termEl.textContent = data.term != null ? data.term : '-';
+
           let displayLeader = data.leader || 'None';
           if (displayLeader.includes('8001')) displayLeader = 'Node 1 (:8001)';
           else if (displayLeader.includes('8002')) displayLeader = 'Node 2 (:8002)';
           else if (displayLeader.includes('8003')) displayLeader = 'Node 3 (:8003)';
           leaderEl.textContent = displayLeader;
           pingEl.textContent = `${duration}ms`;
+
+          // If role changed to Leader, notify
+          if (role === 'Leader' && lastLeaderPort !== port) {
+            if (lastLeaderPort !== null) {
+              logEvent('warn', `ELECTION: Node on :${port} was elected NEW LEADER for Term ${data.term}!`);
+            }
+            lastLeaderPort = port;
+          }
         } else {
           markNodeOffline(card, badge, termEl, leaderEl, pingEl);
         }
-      } catch (err) {
+      } catch {
         markNodeOffline(card, badge, termEl, leaderEl, pingEl);
       }
+    }
+
+    quorumStatusBadge.textContent = `● ${onlineCount}/3 Nodes Active`;
+    if (onlineCount >= 2) {
+      quorumStatusBadge.style.color = '#34d399';
+      quorumStatusBadge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+    } else {
+      quorumStatusBadge.style.color = '#fb7185';
+      quorumStatusBadge.style.borderColor = 'rgba(255, 51, 102, 0.4)';
     }
   }
 
   function markNodeOffline(card, badge, termEl, leaderEl, pingEl) {
-    card.className = 'node-card offline';
+    card.className = 'mesh-card offline';
     if (card.dataset.port === detectActivePort()) {
-      card.classList.add('active-target');
+      card.classList.add('targeted');
     }
     badge.textContent = 'Offline';
-    badge.className = 'role-badge offline';
+    badge.className = 'role-pill offline';
     termEl.textContent = '-';
     leaderEl.textContent = '-';
     pingEl.textContent = 'Timeout';
@@ -211,20 +294,18 @@
       const res = await fetchWithTimeout(`${targetBaseUrl}/metrics`, {}, 1500);
       if (res.ok) {
         const m = await res.json();
-        healthIndicator.style.background = 'var(--accent-emerald)';
-        healthIndicator.style.boxShadow = '0 0 10px var(--accent-emerald)';
-        healthText.textContent = `Connected (${detectActivePort()})`;
+        latencyLabel.textContent = `Connected (: ${detectActivePort()})`;
+        latencyLabel.style.color = '#34d399';
 
-        statKeys.textContent = m.keys_count != null ? m.keys_count : '-';
-        statWalIdx.textContent = m.wal_next_index != null ? m.wal_next_index : '-';
-        statSets.textContent = m.total_sets != null ? m.total_sets : '0';
-        statGets.textContent = m.total_gets != null ? m.total_gets : '0';
+        statKeys.textContent = m.keys_count != null ? m.keys_count : '0';
+        statWalIdx.textContent = m.wal_next_index != null ? m.wal_next_index : '1';
+        statSets.textContent = (m.total_sets || 0) + (m.total_dels || 0);
+        statGets.textContent = (m.total_gets || 0) + (m.total_lists || 0);
         keyCountBadge.textContent = `${m.keys_count || 0} keys`;
       }
     } catch {
-      healthIndicator.style.background = 'var(--accent-rose)';
-      healthIndicator.style.boxShadow = '0 0 10px var(--accent-rose)';
-      healthText.textContent = `Offline (${detectActivePort()})`;
+      latencyLabel.textContent = `Offline (: ${detectActivePort()})`;
+      latencyLabel.style.color = '#fb7185';
     }
   }
 
@@ -236,9 +317,7 @@
         currentKeysMap = await res.json();
         renderTable(currentKeysMap);
       }
-    } catch (err) {
-      // Handled silently during polling
-    }
+    } catch {}
   }
 
   // Render Table
@@ -253,8 +332,18 @@
 
     if (filtered.length === 0) {
       dataTableBody.innerHTML = `
-        <tr class="empty-row">
-          <td colspan="3">${entries.length === 0 ? 'No keys in store yet. Use the form on the left to write one!' : 'No matching keys found.'}</td>
+        <tr class="empty-state-row">
+          <td colspan="3">
+            <div class="empty-state">
+              <div class="empty-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </div>
+              <p class="empty-title">${entries.length === 0 ? 'Store is currently empty' : 'No matching keys found'}</p>
+              <span class="empty-sub">${entries.length === 0 ? 'Use the mutation form on the left to set a key!' : 'Try a different filter term'}</span>
+            </div>
+          </td>
         </tr>
       `;
       return;
@@ -269,18 +358,18 @@
       const safeVal = escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v));
       html += `
         <tr>
-          <td class="key-cell">${safeKey}</td>
-          <td class="val-cell" title="${safeVal}">${safeVal}</td>
+          <td><span class="key-token">${safeKey}</span></td>
+          <td><span class="val-token" title="${safeVal}">${safeVal}</span></td>
           <td style="text-align: right;">
-            <button class="btn-delete" data-key="${safeKey}">Delete</button>
+            <button class="btn-row-del" data-key="${safeKey}">Delete</button>
           </td>
         </tr>
       `;
     }
     dataTableBody.innerHTML = html;
 
-    // Attach delete handlers
-    dataTableBody.querySelectorAll('.btn-delete').forEach(btn => {
+    // Attach delete listeners
+    dataTableBody.querySelectorAll('.btn-row-del').forEach(btn => {
       btn.addEventListener('click', async () => {
         const key = btn.dataset.key;
         if (confirm(`Delete key "${key}"?`)) {
@@ -301,7 +390,7 @@
     const val = setValInput.value.trim();
     if (!key || !val) return;
 
-    logEvent('info', `Sending POST ${targetBaseUrl}/set {"key":"${key}"}`);
+    logEvent('system', `Dispatching write key="${key}" to ${targetBaseUrl}...`);
     try {
       const start = performance.now();
       const res = await fetch(`${targetBaseUrl}/set`, {
@@ -313,26 +402,27 @@
       const data = await res.json();
 
       if (res.ok) {
-        logEvent('success', `SET success: key="${key}", wal_idx=${data.idx} (${dur}ms)`);
+        logEvent('success', `WRITE COMMITTED: key="${key}" -> wal_idx=${data.idx} (${dur}ms). Replicated to followers!`);
         setKeyInput.value = '';
         setValInput.value = '';
+        valTypeBadge.textContent = 'Auto (String / JSON)';
         refreshAll();
       } else {
         if (res.status === 403 && data.error === 'not leader') {
-          logEvent('warn', `Write REJECTED: Target node is Follower! Leader is: ${data.leader}`);
+          logEvent('warn', `WRITE REJECTED: Target node is Follower! Active Leader is: ${data.leader}`);
           alert(`Write Rejected: This node is a Follower (Read Replica).\nCurrent Leader is: ${data.leader}`);
         } else {
-          logEvent('error', `SET error ${res.status}: ${data.error || JSON.stringify(data)}`);
+          logEvent('error', `Write Error (${res.status}): ${data.error || JSON.stringify(data)}`);
         }
       }
     } catch (err) {
-      logEvent('error', `SET failed: ${err.message}`);
+      logEvent('error', `Network failure during write: ${err.message}`);
     }
   });
 
-  // Test Follower Write Simulator
+  // Follower Write Simulation
   testFollowerWriteBtn.addEventListener('click', async () => {
-    logEvent('info', 'Searching for an active Follower in cluster...');
+    logEvent('system', 'Scanning cluster for an active Follower replica...');
     let followerPort = null;
     for (const port of clusterPorts) {
       try {
@@ -348,26 +438,24 @@
     }
 
     if (!followerPort) {
-      alert('No active followers found to test!');
+      alert('No active follower replicas available right now!');
       return;
     }
 
-    logEvent('info', `Intentionally sending POST /set to Follower (: ${followerPort})...`);
+    logEvent('warn', `Simulating client write to Follower (: ${followerPort})...`);
     try {
       const res = await fetch(`http://localhost:${followerPort}/set`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'test_replica_write', val: 'blocked' })
+        body: JSON.stringify({ key: 'demo_follower_write', val: 'blocked' })
       });
       const data = await res.json();
       if (res.status === 403) {
-        logEvent('warn', `Follower (${followerPort}) rejected write with HTTP 403! Leader is: ${data.leader}`);
-        alert(`Raft Follower Demonstration:\n\nFollower :${followerPort} correctly rejected the write!\nPayload: ${JSON.stringify(data)}\n\nThis proves Primary-Read Replica consensus is active!`);
-      } else {
-        logEvent('info', `Response: ${JSON.stringify(data)}`);
+        logEvent('warn', `Follower (: ${followerPort}) rejected write with HTTP 403! Leader address returned: ${data.leader}`);
+        alert(`Raft Primary-Read Replica Invariant:\n\nFollower :${followerPort} rejected the write with HTTP 403 Forbidden!\nPayload: ${JSON.stringify(data)}\n\nThis validates consensus routing: replicas cannot mutate state!`);
       }
     } catch (err) {
-      logEvent('error', `Request error: ${err.message}`);
+      logEvent('error', `Demonstration failed: ${err.message}`);
     }
   });
 
@@ -376,7 +464,7 @@
     const key = getKeyInput.value.trim();
     if (!key) return;
 
-    logEvent('info', `Querying GET ${targetBaseUrl}/get?key=${key}`);
+    logEvent('system', `GET lookup key="${key}" from ${targetBaseUrl}...`);
     const start = performance.now();
     try {
       const res = await fetch(`${targetBaseUrl}/get?key=${encodeURIComponent(key)}`);
@@ -388,24 +476,24 @@
 
       if (res.ok) {
         getStatusCode.textContent = '200 OK';
-        getStatusCode.className = 'status-code';
+        getStatusCode.className = 'badge-status';
         try {
           const obj = JSON.parse(text);
           getResultContent.textContent = JSON.stringify(obj, null, 2);
         } catch {
           getResultContent.textContent = text;
         }
-        logEvent('success', `GET "${key}" found (${dur}ms)`);
+        logEvent('success', `GET "${key}" resolved in ${dur}ms`);
       } else {
-        getStatusCode.textContent = `${res.status} Error`;
-        getStatusCode.className = 'status-code error';
+        getStatusCode.textContent = `${res.status} Not Found`;
+        getStatusCode.className = 'badge-status error';
         getResultContent.textContent = text;
         logEvent('warn', `GET "${key}" returned ${res.status}`);
       }
     } catch (err) {
       getResultBox.classList.remove('hidden');
-      getStatusCode.textContent = 'Network Error';
-      getStatusCode.className = 'status-code error';
+      getStatusCode.textContent = 'Error';
+      getStatusCode.className = 'badge-status error';
       getResultContent.textContent = err.message;
       logEvent('error', `GET failed: ${err.message}`);
     }
@@ -417,7 +505,7 @@
 
   // Execute DELETE
   async function executeDelete(key) {
-    logEvent('info', `Sending POST ${targetBaseUrl}/del {"key":"${key}"}`);
+    logEvent('system', `Dispatching delete for "${key}" to ${targetBaseUrl}...`);
     try {
       const res = await fetch(`${targetBaseUrl}/del`, {
         method: 'POST',
@@ -426,42 +514,42 @@
       });
       const data = await res.json();
       if (res.ok) {
-        logEvent('success', `Deleted key "${key}" (wal_idx: ${data.idx})`);
+        logEvent('success', `DELETE COMMITTED: key="${key}" -> wal_idx=${data.idx}. Replicated to followers.`);
         refreshAll();
       } else {
-        logEvent('error', `DEL error: ${data.error || JSON.stringify(data)}`);
-        alert(`Delete failed: ${data.error || 'Check node status'}`);
+        logEvent('error', `Delete Error (${res.status}): ${data.error}`);
+        alert(`Delete failed: ${data.error}`);
       }
     } catch (err) {
-      logEvent('error', `DEL error: ${err.message}`);
+      logEvent('error', `Delete request failed: ${err.message}`);
     }
   }
 
   // Trigger Snapshot
   triggerSnapshotBtn.addEventListener('click', async () => {
-    logEvent('info', `Triggering POST ${targetBaseUrl}/snapshot`);
+    logEvent('system', `Triggering atomic snapshot & compaction on ${targetBaseUrl}...`);
     try {
       const res = await fetch(`${targetBaseUrl}/snapshot`, { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
-        logEvent('success', 'Snapshot complete and WAL compacted!');
+        logEvent('success', 'SNAPSHOT COMPLETED: In-memory state persisted, WAL truncated.');
         alert('Snapshot created successfully! State safely compacted on disk.');
         refreshAll();
       } else {
-        logEvent('error', `Snapshot error: ${data.error || JSON.stringify(data)}`);
-        alert(`Snapshot failed: ${data.error || 'Requires leader permissions'}`);
+        logEvent('error', `Snapshot error: ${data.error}`);
+        alert(`Snapshot failed: ${data.error}`);
       }
     } catch (err) {
       logEvent('error', `Snapshot request failed: ${err.message}`);
     }
   });
 
-  // Save Snapshot Interval
+  // Save Interval
   saveIntervalBtn.addEventListener('click', async () => {
     const secs = parseInt(snapshotIntervalInput.value, 10);
     if (isNaN(secs) || secs < 0) return;
 
-    logEvent('info', `Updating snapshot interval to ${secs}s...`);
+    logEvent('system', `Updating automated snapshot interval to ${secs}s...`);
     try {
       const res = await fetch(`${targetBaseUrl}/config/snapshot`, {
         method: 'POST',
@@ -470,12 +558,12 @@
       });
       const data = await res.json();
       if (res.ok) {
-        logEvent('success', `Snapshot interval updated to ${secs}s`);
+        logEvent('success', `Snapshot interval updated to ${secs} seconds.`);
       } else {
-        logEvent('error', `Interval error: ${data.error}`);
+        logEvent('error', `Interval update failed: ${data.error}`);
       }
     } catch (err) {
-      logEvent('error', `Interval request failed: ${err.message}`);
+      logEvent('error', `Interval update failed: ${err.message}`);
     }
   });
 
@@ -490,11 +578,11 @@
 
   refreshBtn.addEventListener('click', () => {
     refreshAll();
-    logEvent('info', 'Manual refresh triggered');
+    logEvent('system', 'Manual refresh triggered.');
   });
 
-  // Initial startup
+  // Startup
   setTargetNode(targetBaseUrl);
-  pollInterval = setInterval(refreshAll, 1500);
+  setInterval(refreshAll, 1500);
 
 })();
