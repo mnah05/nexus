@@ -35,3 +35,6 @@ go.work.sum
 wal.log
 *.log.snap
 *.snap.tmp
+*.wal*
+nexus-cluster
+nexus-server
