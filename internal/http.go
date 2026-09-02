@@ -85,7 +85,6 @@ func NewRouter(kv *KV, raftNode *Node) http.Handler {
 
 	// Core middlewares
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(MetricsMiddleware)
 	r.Use(SlogLoggingMiddleware)
