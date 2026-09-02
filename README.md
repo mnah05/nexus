@@ -18,11 +18,26 @@ state is periodically snapshotted to disk with the log cleared after.
 
 ## Quick start
 
+### Standalone Mode
 ```sh
 go run .            # serves on :8080, wal file: wal.log
 go run . /path/wal.log   # custom WAL path (snapshot lands next to it)
 PORT=9090 go run .  # custom port
 ```
+
+### 3-Node Raft Cluster Mode (Primary-Read Replicas with Auto-Election)
+```sh
+# Terminal 1 (Node 1)
+PORT=8001 NODE_ID=localhost:8001 PEERS=localhost:8002,localhost:8003 go run . wal1.log
+
+# Terminal 2 (Node 2)
+PORT=8002 NODE_ID=localhost:8002 PEERS=localhost:8001,localhost:8003 go run . wal2.log
+
+# Terminal 3 (Node 3)
+PORT=8003 NODE_ID=localhost:8003 PEERS=localhost:8001,localhost:8002 go run . wal3.log
+```
+The cluster automatically elects a Leader (Primary). Writes are processed by the Leader; Followers act as read replicas and return the leader's address on write requests. If the leader goes down, the remaining nodes elect a new leader in ~200ms.
+
 
 ## API
 
@@ -40,6 +55,7 @@ All endpoints return JSON responses with explicit `Content-Type: application/jso
 | GET    | `/healthz`           | —                             | `{"status":"healthy"}`                           |
 | GET    | `/readyz`            | —                             | `{"status":"ready"}` (or `503` if closing)       |
 | GET    | `/metrics`           | —                             | JSON operational metrics                         |
+| GET    | `/raft/status`       | —                             | `{"id":...,"role":"Leader\|Follower","term":N}`   |
 | GET    | `/debug/pprof/`      | —                             | Go pprof profiler                                |
 
 ### Examples

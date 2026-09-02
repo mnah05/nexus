@@ -66,8 +66,8 @@ func SlogLoggingMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(rw, r)
 		duration := time.Since(start)
 
-		// Don't spam logs for high-frequency polling on healthz/metrics
-		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && r.URL.Path != "/metrics" {
+		// Don't spam logs for high-frequency polling on healthz/metrics/raft
+		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && r.URL.Path != "/metrics" && !strings.HasPrefix(r.URL.Path, "/raft/") {
 			slog.Info("http request",
 				"method", r.Method,
 				"path", r.URL.Path,
@@ -79,8 +79,8 @@ func SlogLoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// NewRouter wires the HTTP API backed by the KV service.
-func NewRouter(kv *KV) http.Handler {
+// NewRouter wires the HTTP API backed by the KV service and optional Raft node.
+func NewRouter(kv *KV, raftNode *Node) http.Handler {
 	r := chi.NewRouter()
 
 	// Core middlewares
@@ -130,7 +130,43 @@ func NewRouter(kv *KV) http.Handler {
 		writeJSON(w, http.StatusOK, GlobalMetrics.Summary(kv))
 	})
 
-	// GET /get?key=foo
+	// Raft Consensus Endpoints
+	if raftNode != nil {
+		// GET /raft/status returns current cluster state of this node
+		r.Get("/raft/status", func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"id":     raftNode.ID,
+				"role":   raftNode.GetRole().String(),
+				"term":   raftNode.Term(),
+				"leader": raftNode.LeaderID(),
+				"peers":  raftNode.peers,
+			})
+		})
+
+		// POST /raft/request-vote handles incoming vote requests from candidates
+		r.Post("/raft/request-vote", func(w http.ResponseWriter, r *http.Request) {
+			var args RequestVoteArgs
+			if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
+				writeError(w, http.StatusBadRequest, "bad json: "+err.Error())
+				return
+			}
+			reply := raftNode.HandleRequestVote(args)
+			writeJSON(w, http.StatusOK, reply)
+		})
+
+		// POST /raft/append-entries handles incoming heartbeats from the leader
+		r.Post("/raft/append-entries", func(w http.ResponseWriter, r *http.Request) {
+			var args AppendEntriesArgs
+			if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
+				writeError(w, http.StatusBadRequest, "bad json: "+err.Error())
+				return
+			}
+			reply := raftNode.HandleAppendEntries(args)
+			writeJSON(w, http.StatusOK, reply)
+		})
+	}
+
+	// GET /get?key=foo (Serves reads on both Leader and Read Replicas!)
 	r.Get("/get", func(w http.ResponseWriter, r *http.Request) {
 		GlobalMetrics.IncGet()
 		key := r.URL.Query().Get("key")
@@ -159,14 +195,22 @@ func NewRouter(kv *KV) http.Handler {
 		})
 	})
 
-	// GET /list
+	// GET /list (Serves reads on both Leader and Read Replicas!)
 	r.Get("/list", func(w http.ResponseWriter, r *http.Request) {
 		GlobalMetrics.IncList()
 		writeJSON(w, http.StatusOK, kv.List())
 	})
 
-	// POST /snapshot triggers an immediate snapshot + log compaction.
+	// POST /snapshot (Leader only!)
 	r.Post("/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		if raftNode != nil && !raftNode.IsLeader() {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error":  "not leader",
+				"leader": raftNode.LeaderID(),
+			})
+			return
+		}
+
 		GlobalMetrics.IncSnapshot()
 		if err := kv.Snapshot(); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -188,6 +232,14 @@ func NewRouter(kv *KV) http.Handler {
 
 	// POST /config/snapshot sets the interval; {"interval_secs": 0} disables it.
 	r.Post("/config/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		if raftNode != nil && !raftNode.IsLeader() {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error":  "not leader",
+				"leader": raftNode.LeaderID(),
+			})
+			return
+		}
+
 		r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 		var req struct {
 			IntervalSecs *int `json:"interval_secs"`
@@ -215,8 +267,16 @@ func NewRouter(kv *KV) http.Handler {
 		})
 	})
 
-	// POST /set
+	// POST /set (Mutations only allowed on Leader; Followers return leader address!)
 	r.Post("/set", func(w http.ResponseWriter, r *http.Request) {
+		if raftNode != nil && !raftNode.IsLeader() {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error":  "not leader",
+				"leader": raftNode.LeaderID(),
+			})
+			return
+		}
+
 		GlobalMetrics.IncSet()
 		r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 		var req struct {
@@ -251,8 +311,16 @@ func NewRouter(kv *KV) http.Handler {
 		})
 	})
 
-	// POST /del
+	// POST /del (Mutations only allowed on Leader; Followers return leader address!)
 	r.Post("/del", func(w http.ResponseWriter, r *http.Request) {
+		if raftNode != nil && !raftNode.IsLeader() {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error":  "not leader",
+				"leader": raftNode.LeaderID(),
+			})
+			return
+		}
+
 		GlobalMetrics.IncDel()
 		r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 		var req struct {

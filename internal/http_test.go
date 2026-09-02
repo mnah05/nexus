@@ -24,7 +24,7 @@ func setupTestServer(t *testing.T) (*KV, http.Handler) {
 		_ = kv.Close()
 	})
 
-	router := NewRouter(kv)
+	router := NewRouter(kv, nil)
 	return kv, router
 }
 
@@ -322,3 +322,65 @@ func TestHTTPObservabilityEndpoints(t *testing.T) {
 		t.Fatalf("expected 503 on /readyz after KV is closed, got %d", rec.Code)
 	}
 }
+
+func TestRaftHTTPFollowerRejectionAndLeaderAcceptance(t *testing.T) {
+	tmpDir := t.TempDir()
+	walPath := filepath.Join(tmpDir, "raft_http.wal")
+	kv, err := NewKV(walPath)
+	if err != nil {
+		t.Fatalf("NewKV failed: %v", err)
+	}
+	defer kv.Close()
+
+	// Create node as Follower with known leader "node-1:8001"
+	node := NewNode("node-2:8002", []string{"node-1:8001"})
+	defer node.Close()
+
+	node.mu.Lock()
+	node.Role = StateFollower
+	node.leaderID = "node-1:8001"
+	node.mu.Unlock()
+
+	router := NewRouter(kv, node)
+
+	// 1. /raft/status
+	req := httptest.NewRequest(http.MethodGet, "/raft/status", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /raft/status, got %d", rec.Code)
+	}
+
+	// 2. Follower rejects POST /set and returns leader address!
+	setBody := `{"key":"k1","val":"v1"}`
+	req = httptest.NewRequest(http.MethodPost, "/set", bytes.NewBufferString(setBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden on follower write, got %d", rec.Code)
+	}
+	var errResp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode follower rejection: %v", err)
+	}
+	if errResp["error"] != "not leader" || errResp["leader"] != "node-1:8001" {
+		t.Fatalf("unexpected rejection payload: %+v", errResp)
+	}
+
+	// 3. Promote node to Leader and verify POST /set succeeds!
+	node.mu.Lock()
+	node.Role = StateLeader
+	node.mu.Unlock()
+
+	req = httptest.NewRequest(http.MethodPost, "/set", bytes.NewBufferString(setBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on leader write, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
