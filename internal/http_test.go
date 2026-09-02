@@ -297,18 +297,12 @@ func TestHTTPObservabilityEndpoints(t *testing.T) {
 		t.Fatalf("expected application/json for metrics, got %s", ct)
 	}
 
-	// 4. /metrics (Prometheus format)
-	req = httptest.NewRequest(http.MethodGet, "/metrics?format=prometheus", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 on /metrics?format=prometheus, got %d", rec.Code)
+	var metricsResp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&metricsResp); err != nil {
+		t.Fatalf("expected valid JSON from /metrics: %v", err)
 	}
-	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/plain") {
-		t.Fatalf("expected text/plain for prometheus format, got %s", ct)
-	}
-	if !strings.Contains(rec.Body.String(), "nexus_uptime_seconds") {
-		t.Fatalf("prometheus metrics missing nexus_uptime_seconds: %s", rec.Body.String())
+	if _, ok := metricsResp["uptime_seconds"]; !ok {
+		t.Fatalf("metrics missing uptime_seconds: %v", metricsResp)
 	}
 
 	// 5. /debug/pprof/

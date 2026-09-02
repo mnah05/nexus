@@ -39,7 +39,7 @@ All endpoints return JSON responses with explicit `Content-Type: application/jso
 | POST   | `/config/snapshot`   | `{"interval_secs":N}`         | `{"ok":true,"interval_secs":N}`                  |
 | GET    | `/healthz`           | —                             | `{"status":"healthy"}`                           |
 | GET    | `/readyz`            | —                             | `{"status":"ready"}` (or `503` if closing)       |
-| GET    | `/metrics`           | —                             | JSON metrics or Prometheus text format           |
+| GET    | `/metrics`           | —                             | JSON operational metrics                         |
 | GET    | `/debug/pprof/`      | —                             | Go pprof profiler                                |
 
 ### Examples

@@ -1,9 +1,7 @@
 package internal
 
 import (
-	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -111,42 +109,6 @@ func (m *Metrics) Summary(kv *KV) map[string]any {
 	}
 
 	return summary
-}
-
-// PrometheusFormat exports metrics in Prometheus text exposition format.
-func (m *Metrics) PrometheusFormat(kv *KV) string {
-	var sb strings.Builder
-	uptime := time.Since(m.startTime).Seconds()
-
-	sb.WriteString("# HELP nexus_uptime_seconds Process uptime in seconds.\n")
-	sb.WriteString("# TYPE nexus_uptime_seconds gauge\n")
-	sb.WriteString(fmt.Sprintf("nexus_uptime_seconds %.2f\n\n", uptime))
-
-	sb.WriteString("# HELP nexus_http_requests_total Total HTTP requests handled.\n")
-	sb.WriteString("# TYPE nexus_http_requests_total counter\n")
-	sb.WriteString(fmt.Sprintf("nexus_http_requests_total{status_class=\"2xx\"} %d\n", m.http2xx.Load()))
-	sb.WriteString(fmt.Sprintf("nexus_http_requests_total{status_class=\"4xx\"} %d\n", m.http4xx.Load()))
-	sb.WriteString(fmt.Sprintf("nexus_http_requests_total{status_class=\"5xx\"} %d\n\n", m.http5xx.Load()))
-
-	sb.WriteString("# HELP nexus_operations_total Total storage operations.\n")
-	sb.WriteString("# TYPE nexus_operations_total counter\n")
-	sb.WriteString(fmt.Sprintf("nexus_operations_total{op=\"get\"} %d\n", m.opGets.Load()))
-	sb.WriteString(fmt.Sprintf("nexus_operations_total{op=\"set\"} %d\n", m.opSets.Load()))
-	sb.WriteString(fmt.Sprintf("nexus_operations_total{op=\"del\"} %d\n", m.opDels.Load()))
-	sb.WriteString(fmt.Sprintf("nexus_operations_total{op=\"list\"} %d\n", m.opLists.Load()))
-	sb.WriteString(fmt.Sprintf("nexus_operations_total{op=\"snapshot\"} %d\n\n", m.opSnapshots.Load()))
-
-	if kv != nil {
-		sb.WriteString("# HELP nexus_keys_total Total number of active keys.\n")
-		sb.WriteString("# TYPE nexus_keys_total gauge\n")
-		sb.WriteString(fmt.Sprintf("nexus_keys_total %d\n\n", kv.KeyCount()))
-
-		sb.WriteString("# HELP nexus_wal_next_index Next monotonic WAL index.\n")
-		sb.WriteString("# TYPE nexus_wal_next_index gauge\n")
-		sb.WriteString(fmt.Sprintf("nexus_wal_next_index %d\n", kv.NextIdx()))
-	}
-
-	return sb.String()
 }
 
 // MetricsMiddleware logs and records metrics for each HTTP request.

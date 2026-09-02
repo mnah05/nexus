@@ -125,17 +125,8 @@ func NewRouter(kv *KV) http.Handler {
 		})
 	})
 
-	// Metrics endpoint (supports both JSON and Prometheus format)
+	// Metrics endpoint (returns JSON operational metrics)
 	r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		accept := r.Header.Get("Accept")
-		format := r.URL.Query().Get("format")
-		if format == "prometheus" || strings.Contains(accept, "text/plain") {
-			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(GlobalMetrics.PrometheusFormat(kv)))
-			return
-		}
-
 		writeJSON(w, http.StatusOK, GlobalMetrics.Summary(kv))
 	})
 
