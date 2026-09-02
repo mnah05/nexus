@@ -43,3 +43,10 @@ func (s *Store[V]) Snapshot() map[string]V {
 	maps.Copy(out, s.m)
 	return out
 }
+
+// Len returns the number of keys currently stored.
+func (s *Store[V]) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.m)
+}

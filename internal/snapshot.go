@@ -5,15 +5,17 @@ import (
 	"os"
 )
 
-// snapshot is the on-disk wire format: a full copy of the key-value map.
-type snapshot struct {
-	Entries map[string]string `json:"entries"`
+// Snapshot is the on-disk wire format: a full copy of the key-value map
+// along with the last applied WAL index.
+type Snapshot[V any] struct {
+	LastIdx uint64       `json:"last_idx,omitempty"`
+	Entries map[string]V `json:"entries"`
 }
 
-// SaveSnapshot atomically persists a copy of the map via temp file + rename,
+// SaveSnapshot atomically persists a snapshot via temp file + rename,
 // so a crash mid-write never leaves a partial snapshot behind.
-func SaveSnapshot(path string, m map[string]string) error {
-	b, err := json.Marshal(snapshot{Entries: m})
+func SaveSnapshot[V any](path string, snap Snapshot[V]) error {
+	b, err := json.Marshal(snap)
 	if err != nil {
 		return err
 	}
@@ -24,19 +26,22 @@ func SaveSnapshot(path string, m map[string]string) error {
 	return os.Rename(tmp, path)
 }
 
-// LoadSnapshot restores a map from path. It returns (nil, nil) when no
-// snapshot exists yet, so recovery can fall back to the WAL.
-func LoadSnapshot(path string) (map[string]string, error) {
+// LoadSnapshot restores a Snapshot from path. If no snapshot file exists,
+// it returns an empty Snapshot with nil error, so recovery can fall back to the WAL.
+func LoadSnapshot[V any](path string) (Snapshot[V], error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return Snapshot[V]{Entries: make(map[string]V)}, nil
 		}
-		return nil, err
+		return Snapshot[V]{}, err
 	}
-	var s snapshot
+	var s Snapshot[V]
 	if err := json.Unmarshal(b, &s); err != nil {
-		return nil, err
+		return Snapshot[V]{}, err
 	}
-	return s.Entries, nil
+	if s.Entries == nil {
+		s.Entries = make(map[string]V)
+	}
+	return s, nil
 }

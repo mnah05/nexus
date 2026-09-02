@@ -26,23 +26,32 @@ PORT=9090 go run .  # custom port
 
 ## API
 
-| Method | Endpoint             | Body / Query                  | Response              |
-|--------|----------------------|-------------------------------|-----------------------|
-| GET    | `/get?key=<k>`       | —                             | value or `404`        |
-| GET    | `/list`              | —                             | full map as JSON      |
-| POST   | `/set`               | `{"key":"k","val":"v"}`       | `OK <wal index>`      |
-| POST   | `/del`               | `{"key":"k"}`                 | `OK <wal index>`      |
-| POST   | `/snapshot`          | —                             | snapshot + truncate now |
-| GET    | `/config/snapshot`   | —                             | `{"interval_secs":N}` |
-| POST   | `/config/snapshot`   | `{"interval_secs":N}`         | set interval (`0` disables) |
+All endpoints return JSON responses with explicit `Content-Type: application/json` headers (with raw plain-text available via `?format=raw` or `Accept: text/plain` on `/get`).
+
+| Method | Endpoint             | Body / Query                  | Response                                         |
+|--------|----------------------|-------------------------------|--------------------------------------------------|
+| GET    | `/get?key=<k>`       | —                             | `{"key":"k","val":"v"}` or `404`                 |
+| GET    | `/list`              | —                             | full map as JSON `{"k":"v", ...}`                |
+| POST   | `/set`               | `{"key":"k","val":"v"}`       | `{"ok":true,"idx":<wal_idx>,"key":"k","val":"v"}`|
+| POST   | `/del`               | `{"key":"k"}`                 | `{"ok":true,"idx":<wal_idx>,"key":"k"}`          |
+| POST   | `/snapshot`          | —                             | `{"ok":true,"message":"snapshot complete"}`       |
+| GET    | `/config/snapshot`   | —                             | `{"interval_secs":N}`                            |
+| POST   | `/config/snapshot`   | `{"interval_secs":N}`         | `{"ok":true,"interval_secs":N}`                  |
+| GET    | `/healthz`           | —                             | `{"status":"healthy"}`                           |
+| GET    | `/readyz`            | —                             | `{"status":"ready"}` (or `503` if closing)       |
+| GET    | `/metrics`           | —                             | JSON metrics or Prometheus text format           |
+| GET    | `/debug/pprof/`      | —                             | Go pprof profiler                                |
 
 ### Examples
 
 ```sh
-curl -X POST localhost:8080/set -d '{"key":"foo","val":"bar"}'   # OK 1
-curl 'localhost:8080/get?key=foo'                                # bar
+curl -X POST localhost:8080/set -d '{"key":"foo","val":"bar"}'   # {"ok":true,"idx":1,"key":"foo","val":"bar"}
+curl 'localhost:8080/get?key=foo'                                # {"key":"foo","val":"bar"}
+curl 'localhost:8080/get?key=foo&format=raw'                      # bar
 curl localhost:8080/list                                         # {"foo":"bar"}
-curl -X POST localhost:8080/del -d '{"key":"foo"}'               # OK 2
+curl -X POST localhost:8080/del -d '{"key":"foo"}'               # {"ok":true,"idx":2,"key":"foo"}
+curl localhost:8080/healthz                                      # {"status":"healthy"}
+curl localhost:8080/metrics                                      # JSON metrics summary
 ```
 
 ## Files
@@ -61,4 +70,4 @@ go test -race ./...
   few writes.
 - Single node only — no replication or consensus.
 - No auth/TLS — bind it behind a firewall or proxy.
-- Snapshotting pauses writes for its duration.
+
