@@ -333,7 +333,7 @@ func TestRaftHTTPFollowerRejectionAndLeaderAcceptance(t *testing.T) {
 	defer kv.Close()
 
 	// Create node as Follower with known leader "node-1:8001"
-	node := NewNode("node-2:8002", []string{"node-1:8001"})
+	node := NewNode("node-2:8002", []string{"node-1:8001"}, kv)
 	defer node.Close()
 
 	node.mu.Lock()

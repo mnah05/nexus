@@ -51,10 +51,11 @@ type Node struct {
 	httpClient *http.Client
 	stop       chan struct{}
 	wg         sync.WaitGroup
+	kv         *KV
 }
 
 // NewNode initializes a new Raft node in the Follower state.
-func NewNode(id string, peers []string) *Node {
+func NewNode(id string, peers []string, kv *KV) *Node {
 	n := &Node{
 		ID:            id,
 		peers:         peers,
@@ -65,6 +66,7 @@ func NewNode(id string, peers []string) *Node {
 		lastHeartbeat: time.Now(),
 		httpClient:    &http.Client{Timeout: 100 * time.Millisecond},
 		stop:          make(chan struct{}),
+		kv:            kv,
 	}
 
 	// Start background election timer
@@ -132,8 +134,9 @@ type RequestVoteReply struct {
 
 // AppendEntriesArgs represents the heartbeat / log replication payload sent by the leader.
 type AppendEntriesArgs struct {
-	Term     int64  `json:"term"`
-	LeaderID string `json:"leader_id"`
+	Term     int64      `json:"term"`
+	LeaderID string     `json:"leader_id"`
+	Entries  []WALEntry `json:"entries,omitempty"`
 }
 
 // AppendEntriesReply represents the response from followers to the leader.
@@ -396,7 +399,37 @@ func (n *Node) HandleAppendEntries(args AppendEntriesArgs) AppendEntriesReply {
 	// RULE 3: Valid heartbeat received from current leader, reset election countdown timer.
 	n.lastHeartbeat = time.Now()
 
+	// RULE 4: If entries is not empty, apply each entry to our local store!
+	if n.kv != nil && len(args.Entries) > 0 {
+		for _, entry := range args.Entries {
+			switch entry.Op {
+			case OpSet:
+				n.kv.Set(entry.Key, entry.Val)
+			case OpDel:
+				n.kv.Del(entry.Key)
+			}
+		}
+	}
 	reply.Success = true
 	reply.Term = n.currTerm
 	return reply
+}
+
+// ReplicateEntry broadcasts a new WAL mutation to all followers in parallel.
+func (n *Node) ReplicateEntry(entry WALEntry) {
+	n.mu.Lock()
+	term := n.currTerm
+	leaderID := n.ID
+	peers := n.peers
+	n.mu.Unlock()
+	for _, peer := range peers {
+		go func(addr string) {
+			args := AppendEntriesArgs{
+				Term:     term,
+				LeaderID: leaderID,
+				Entries:  []WALEntry{entry},
+			}
+			_, _ = n.sendAppendEntries(addr, args)
+		}(peer)
+	}
 }

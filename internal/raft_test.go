@@ -1,15 +1,16 @@
 package internal
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestRaftElectionAndHeartbeatDirect(t *testing.T) {
 	// Initialize 3 nodes
-	node1 := NewNode("node1", []string{"node2", "node3"})
-	node2 := NewNode("node2", []string{"node1", "node3"})
-	node3 := NewNode("node3", []string{"node1", "node2"})
+	node1 := NewNode("node1", []string{"node2", "node3"}, nil)
+	node2 := NewNode("node2", []string{"node1", "node3"}, nil)
+	node3 := NewNode("node3", []string{"node1", "node2"}, nil)
 	defer node1.Close()
 	defer node2.Close()
 	defer node3.Close()
@@ -67,7 +68,7 @@ func TestRaftElectionAndHeartbeatDirect(t *testing.T) {
 
 func TestRaftSingleNodeElection(t *testing.T) {
 	// A single node with 0 peers should elect itself leader immediately on timeout
-	node := NewNode("standalone", []string{})
+	node := NewNode("standalone", []string{}, nil)
 	defer node.Close()
 
 	// Wait up to 500ms for election timeout to trigger
@@ -80,4 +81,65 @@ func TestRaftSingleNodeElection(t *testing.T) {
 	}
 
 	t.Fatalf("standalone node did not elect itself leader within 500ms")
+}
+
+func TestRaftLogReplicationToFollower(t *testing.T) {
+	tmpDir := t.TempDir()
+	kv, err := NewKV(filepath.Join(tmpDir, "replica.wal"))
+	if err != nil {
+		t.Fatalf("NewKV failed: %v", err)
+	}
+	defer kv.Close()
+
+	// Follower node backed by real KV store
+	follower := NewNode("node2", []string{"node1"}, kv)
+	defer follower.Close()
+
+	// Leader sends an entry: SET key1 = val1
+	reply := follower.HandleAppendEntries(AppendEntriesArgs{
+		Term:     1,
+		LeaderID: "node1",
+		Entries: []WALEntry{
+			{
+				Idx:  1,
+				Op:   OpSet,
+				Term: 1,
+				Key:  "key1",
+				Val:  "val1",
+			},
+		},
+	})
+
+	if !reply.Success {
+		t.Fatalf("expected append entries to succeed on follower")
+	}
+
+	// Verify follower's store now has the replicated key!
+	val, ok := kv.Get("key1")
+	if !ok || val != "val1" {
+		t.Fatalf("expected key1=val1 on follower store, got %q (ok=%v)", val, ok)
+	}
+
+	// Leader sends another entry: DEL key1
+	reply = follower.HandleAppendEntries(AppendEntriesArgs{
+		Term:     1,
+		LeaderID: "node1",
+		Entries: []WALEntry{
+			{
+				Idx:  2,
+				Op:   OpDel,
+				Term: 1,
+				Key:  "key1",
+			},
+		},
+	})
+
+	if !reply.Success {
+		t.Fatalf("expected del append entries to succeed")
+	}
+
+	// Verify follower applied the delete
+	if _, ok := kv.Get("key1"); ok {
+		t.Fatalf("expected key1 to be deleted on follower")
+	}
 }

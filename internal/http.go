@@ -302,6 +302,16 @@ func NewRouter(kv *KV, raftNode *Node) http.Handler {
 			return
 		}
 
+		if raftNode != nil {
+			raftNode.ReplicateEntry(WALEntry{
+				Idx:  idx,
+				Op:   OpSet,
+				Term: int(raftNode.Term()),
+				Key:  req.Key,
+				Val:  req.Val,
+			})
+		}
+
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":  true,
 			"idx": idx,
@@ -339,6 +349,15 @@ func NewRouter(kv *KV, raftNode *Node) http.Handler {
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+
+		if raftNode != nil {
+			raftNode.ReplicateEntry(WALEntry{
+				Idx:  idx,
+				Op:   OpDel,
+				Term: int(raftNode.Term()),
+				Key:  req.Key,
+			})
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{

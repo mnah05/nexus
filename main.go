@@ -55,6 +55,13 @@ func main() {
 		peersStr = os.Args[3]
 	}
 
+	// Recover state from snapshot and WAL before serving any request.
+	kv, err := internal.NewKV(walPath)
+	if err != nil {
+		slog.Error("failed to initialize kv", "error", err)
+		os.Exit(1)
+	}
+
 	var raftNode *internal.Node
 	if nodeID != "" || peersStr != "" {
 		if nodeID == "" {
@@ -70,17 +77,7 @@ func main() {
 			}
 		}
 		slog.Info("starting in Raft cluster mode", "node_id", nodeID, "peers", peers)
-		raftNode = internal.NewNode(nodeID, peers)
-	}
-
-	// Recover state from snapshot and WAL before serving any request.
-	kv, err := internal.NewKV(walPath)
-	if err != nil {
-		slog.Error("failed to initialize kv", "error", err)
-		if raftNode != nil {
-			raftNode.Close()
-		}
-		os.Exit(1)
+		raftNode = internal.NewNode(nodeID, peers, kv)
 	}
 
 	server := &http.Server{
