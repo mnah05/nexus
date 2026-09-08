@@ -4,7 +4,7 @@ A persistent, distributed key-value store built with Go and Raft consensus. It p
 
 ## Demo
 
-[Watch the Nexus demo video](./Cap%202026-09-03%20at%2008.06.58.mp4)
+[Watch the Nexus demo video](https://raw.githubusercontent.com/mnah05/nexus/main/Cap%202026-09-03%20at%2008.06.58.mp4)
 
 ## Quick Start
 
