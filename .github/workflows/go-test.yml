@@ -1,0 +1,32 @@
+name: GO test runner
+
+on:
+    push:
+        branches:
+            - "**"
+    pull_request:
+        branches:
+            - main
+
+jobs: 
+    test:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout-code
+              uses: actions/checkout@v4
+
+            - name: Setup GO
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.mod
+                  cache: true
+
+            - name: Download dependencies
+              run: go mod download
+
+            - name: Run Go Vet
+              run: go vet ./...
+
+            - name: Run GO Test
+              run: go test -v ./...
