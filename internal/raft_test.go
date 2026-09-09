@@ -1,16 +1,65 @@
 package internal
 
 import (
+	"context"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
 
+// newTestNode builds a Raft node with default timings and an in-memory transport.
+func newTestNode(id string, peers []string, kv *KV) *Node {
+	return New(DefaultConfig(id, peers), &testTransport{}, kv)
+}
+
+// testTransport forwards Raft RPCs to nodes registered in memory, bypassing HTTP.
+type testTransport struct {
+	mu    sync.Mutex
+	nodes map[string]*Node
+}
+
+func (t *testTransport) add(n *Node) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.nodes == nil {
+		t.nodes = make(map[string]*Node)
+	}
+	t.nodes[n.cfg.ID] = n
+}
+
+func (t *testTransport) peer(addr string) (*Node, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n, ok := t.nodes[addr]
+	if !ok {
+		return nil, fmt.Errorf("unknown peer %s", addr)
+	}
+	return n, nil
+}
+
+func (t *testTransport) RequestVote(ctx context.Context, addr string, args RequestVoteArgs) (RequestVoteReply, error) {
+	n, err := t.peer(addr)
+	if err != nil {
+		return RequestVoteReply{}, err
+	}
+	return n.HandleRequestVote(args), nil
+}
+
+func (t *testTransport) AppendEntries(ctx context.Context, addr string, args AppendEntriesArgs) (AppendEntriesReply, error) {
+	n, err := t.peer(addr)
+	if err != nil {
+		return AppendEntriesReply{}, err
+	}
+	return n.HandleAppendEntries(args), nil
+}
+
 func TestRaftElectionAndHeartbeatDirect(t *testing.T) {
 	// Initialize 3 nodes
-	node1 := NewNode("node1", []string{"node2", "node3"}, nil)
-	node2 := NewNode("node2", []string{"node1", "node3"}, nil)
-	node3 := NewNode("node3", []string{"node1", "node2"}, nil)
+	node1 := newTestNode("node1", []string{"node2", "node3"}, nil)
+	node2 := newTestNode("node2", []string{"node1", "node3"}, nil)
+	node3 := newTestNode("node3", []string{"node1", "node2"}, nil)
 	defer node1.Close()
 	defer node2.Close()
 	defer node3.Close()
@@ -68,8 +117,9 @@ func TestRaftElectionAndHeartbeatDirect(t *testing.T) {
 
 func TestRaftSingleNodeElection(t *testing.T) {
 	// A single node with 0 peers should elect itself leader immediately on timeout
-	node := NewNode("standalone", []string{}, nil)
+	node := newTestNode("standalone", []string{}, nil)
 	defer node.Close()
+	go node.Run()
 
 	// Wait up to 500ms for election timeout to trigger
 	deadline := time.Now().Add(500 * time.Millisecond)
@@ -83,6 +133,69 @@ func TestRaftSingleNodeElection(t *testing.T) {
 	t.Fatalf("standalone node did not elect itself leader within 500ms")
 }
 
+func TestRaftMultiNodeElection(t *testing.T) {
+	tr := &testTransport{}
+	ids := []string{"node1", "node2", "node3"}
+	peersOf := func(self string) []string {
+		var peers []string
+		for _, id := range ids {
+			if id != self {
+				peers = append(peers, id)
+			}
+		}
+		return peers
+	}
+	makeNode := func(id string) *Node {
+		cfg := DefaultConfig(id, peersOf(id))
+		cfg.ElectionMin = 40 * time.Millisecond
+		cfg.ElectionMax = 120 * time.Millisecond
+		cfg.HeartbeatInterval = 20 * time.Millisecond
+		return New(cfg, tr, nil)
+	}
+
+	var nodes []*Node
+	for _, id := range ids {
+		nodes = append(nodes, makeNode(id))
+	}
+	for _, n := range nodes {
+		tr.add(n)
+	}
+	for _, n := range nodes {
+		defer n.Close()
+	}
+	for _, n := range nodes {
+		go n.Run()
+	}
+
+	// Wait until every node agrees on the same leader.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		leaders := make(map[string]bool)
+		leaderNode := true
+		for _, n := range nodes {
+			leaders[n.LeaderID()] = true
+			if n.LeaderID() == "" {
+				leaderNode = false
+			}
+		}
+		if leaderNode && len(leaders) == 1 {
+			var leaderID string
+			for id := range leaders {
+				leaderID = id
+			}
+			for _, n := range nodes {
+				if n.cfg.ID == leaderID && !n.IsLeader() {
+					t.Fatalf("node %s reported as leader but is not", leaderID)
+				}
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("cluster did not converge on a single leader within 5s")
+}
+
 func TestRaftLogReplicationToFollower(t *testing.T) {
 	tmpDir := t.TempDir()
 	kv, err := NewKV(filepath.Join(tmpDir, "replica.wal"))
@@ -92,7 +205,7 @@ func TestRaftLogReplicationToFollower(t *testing.T) {
 	defer kv.Close()
 
 	// Follower node backed by real KV store
-	follower := NewNode("node2", []string{"node1"}, kv)
+	follower := newTestNode("node2", []string{"node1"}, kv)
 	defer follower.Close()
 
 	// Leader sends an entry: SET key1 = val1

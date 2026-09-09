@@ -333,11 +333,11 @@ func TestRaftHTTPFollowerRejectionAndLeaderAcceptance(t *testing.T) {
 	defer kv.Close()
 
 	// Create node as Follower with known leader "node-1:8001"
-	node := NewNode("node-2:8002", []string{"node-1:8001"}, kv)
+	node := newTestNode("node-2:8002", []string{"node-1:8001"}, kv)
 	defer node.Close()
 
 	node.mu.Lock()
-	node.Role = StateFollower
+	node.role = StateFollower
 	node.leaderID = "node-1:8001"
 	node.mu.Unlock()
 
@@ -371,7 +371,7 @@ func TestRaftHTTPFollowerRejectionAndLeaderAcceptance(t *testing.T) {
 
 	// 3. Promote node to Leader and verify POST /set succeeds!
 	node.mu.Lock()
-	node.Role = StateLeader
+	node.role = StateLeader
 	node.mu.Unlock()
 
 	req = httptest.NewRequest(http.MethodPost, "/set", bytes.NewBufferString(setBody))
@@ -411,5 +411,3 @@ func TestHTTPWebUIServing(t *testing.T) {
 		t.Fatalf("expected 200 OK on /static/app.css, got %d", rec.Code)
 	}
 }
-
-

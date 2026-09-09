@@ -98,7 +98,9 @@ func main() {
 			}
 		}
 		slog.Info("starting in Raft cluster mode", "node_id", nodeID, "peers", peers)
-		raftNode = internal.NewNode(nodeID, peers, kv)
+		cfg := internal.DefaultConfig(nodeID, peers)
+		raftNode = internal.New(cfg, internal.NewHTTPTransport(cfg.HTTPTimeout), kv)
+		go raftNode.Run()
 	}
 
 	// Admin controls are intentionally local-demo oriented. They let the UI

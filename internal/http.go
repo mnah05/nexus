@@ -163,12 +163,13 @@ func NewRouter(kv *KV, raftNode *Node) http.Handler {
 	if raftNode != nil {
 		// GET /raft/status returns current cluster state of this node
 		r.Get("/raft/status", func(w http.ResponseWriter, r *http.Request) {
+			st := raftNode.Status()
 			writeJSON(w, http.StatusOK, map[string]any{
-				"id":     raftNode.ID,
-				"role":   raftNode.GetRole().String(),
-				"term":   raftNode.Term(),
-				"leader": raftNode.LeaderID(),
-				"peers":  raftNode.peers,
+				"id":     st.ID,
+				"role":   st.Role.String(),
+				"term":   st.Term,
+				"leader": st.LeaderID,
+				"peers":  st.Peers,
 			})
 		})
 
