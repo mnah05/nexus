@@ -2,6 +2,9 @@
 
 This document explains the Raft consensus, automated leader election, live log replication, and primary-read replica architecture implemented in Nexus KV.
 
+> The timings below are the defaults from `DefaultConfig`. For a code map of
+> `internal/raft.go` (Config/Transport/Node structure), see [raft.md](raft.md).
+
 ---
 
 ## 1. Raft State Transitions

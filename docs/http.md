@@ -1,7 +1,12 @@
 # `internal/http.go` — HTTP API
 
-Thin chi router that maps REST endpoints onto KV method calls.
-No business logic — decode input, call KV, map errors to status codes.
+Thin chi router that maps REST endpoints onto KV (and optionally Raft)
+methods. No business logic — decode input, call KV/raft, map errors to
+status codes.
+
+`NewRouter(kv, raftNode)` takes the KV service and an optional `*Node`.
+When `raftNode` is non-nil the `/raft/*` endpoints are registered and
+leader checks gate the mutation routes.
 
 ## Routes
 
@@ -14,6 +19,13 @@ No business logic — decode input, call KV, map errors to status codes.
 | POST   | `/snapshot`         | `kv.Snapshot`      | 500 |
 | GET    | `/config/snapshot`  | reads interval     | — |
 | POST   | `/config/snapshot`  | `kv.SetTiming`     | 400 bad JSON / negative |
+| GET    | `/raft/status`      | `raftNode.Status()` snapshot | — |
+| POST   | `/raft/request-vote` | `raftNode.HandleRequestVote` | 400 bad JSON |
+| POST   | `/raft/append-entries` | `raftNode.HandleAppendEntries` | 400 bad JSON |
+
+In cluster mode `/set`, `/del`, and `/snapshot` require leadership: a
+follower answers `403` with `{"error":"not leader","leader":"<addr>"}`
+and the leader broadcasts each mutation via `raftNode.ReplicateEntry`.
 
 ## Conventions
 

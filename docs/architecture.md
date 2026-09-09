@@ -30,12 +30,20 @@ Per-file deep dives live in their own docs:
 | [http.md](http.md) | HTTP API routes |
 | [store_test.md](store_test.md) | Store test suite |
 | [how-it-works.md](how-it-works.md) | Why the design works the way it does |
+| [raft.md](raft.md) | `internal/raft.go` code map |
+| [raft-election.md](raft-election.md) | Leader election, replication, cluster guide |
+| [raft-roadmap.md](raft-roadmap.md) | Consensus feature roadmap |
 
 ### `main.go`
 Entry point and wiring only. Resolves the WAL path (first CLI arg,
 default `wal.log`) and port (`PORT` env, default `:8080`), constructs
 the KV service — which recovers state from disk — then serves the chi
 router with `http.ListenAndServe`.
+
+In cluster mode (`NODE_ID`/`PEERS` env or `<nodeID>`/`<peer1,peer2>`
+CLI args) it also builds the raft node: `DefaultConfig` → `New` with an
+HTTP `Transport`, then `go raftNode.Run()`. `raftNode.Close()` runs on the
+shutdown/restart paths.
 
 ### `internal/kv.go`
 The core service that ties everything together.
@@ -81,8 +89,17 @@ Point-in-time persistence of the full map as JSON.
 
 ### `internal/http.go`
 chi router exposing the API: `/get`, `/list`, `/set`, `/del`,
-`/snapshot`, and `/config/snapshot` (GET/POST). Handlers are thin —
-they decode input, call KV, and map errors to status codes.
+`/snapshot`, and `/config/snapshot` (GET/POST), plus the Raft endpoints
+`/raft/status`, `/raft/request-vote`, and `/raft/append-entries` when a
+`*Node` is wired in. Handlers are thin — they decode input, call KV/raft,
+and map errors to status codes.
+
+### `internal/raft.go`
+Raft consensus node (see [raft.md](raft.md)). Built from a `Config`, a
+`Transport` (peer RPC seam: HTTP in prod, in-memory fake in tests), and a
+minimal `applyStore`. The constructor is side-effect free; `Run()` drives
+the election loop and `Close()` cancels and drains. All consensus state is
+private behind one mutex, with `Status()` as the consistent read snapshot.
 
 ### `internal/store_test.go`
 Tests for the store: get/set/del semantics, overwrite behavior,

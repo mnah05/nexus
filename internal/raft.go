@@ -91,6 +91,11 @@ type Transport interface {
 	AppendEntries(ctx context.Context, addr string, args AppendEntriesArgs) (AppendEntriesReply, error)
 }
 
+const (
+	requestVotePath   = "/raft/request-vote"
+	appendEntriesPath = "/raft/append-entries"
+)
+
 // httpTransport implements Transport over HTTP/JSON.
 type httpTransport struct {
 	client *http.Client
@@ -101,8 +106,9 @@ func NewHTTPTransport(timeout time.Duration) Transport {
 	return &httpTransport{client: &http.Client{Timeout: timeout}}
 }
 
-// postJSON posts args to path on addr and decodes the JSON reply.
-func postJSON[R any](t *httpTransport, ctx context.Context, addr, path string, args any) (*R, error) {
+// postJSON sends a JSON request and returns the HTTP response. The caller is
+// responsible for decoding the response into the expected reply type.
+func postJSON(t *httpTransport, ctx context.Context, addr, path string, args interface{}) (*http.Response, error) {
 	data, err := json.Marshal(args)
 	if err != nil {
 		return nil, err
@@ -123,29 +129,35 @@ func postJSON[R any](t *httpTransport, ctx context.Context, addr, path string, a
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
-	var reply R
-	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
-		return nil, err
-	}
-	return &reply, nil
+	return resp, nil
 }
 
 func (t *httpTransport) RequestVote(ctx context.Context, addr string, args RequestVoteArgs) (RequestVoteReply, error) {
-	reply, err := postJSON[RequestVoteReply](t, ctx, addr, "/raft/request-vote", args)
+	resp, err := postJSON(t, ctx, addr, requestVotePath, args)
 	if err != nil {
 		return RequestVoteReply{}, err
 	}
-	return *reply, nil
+	defer resp.Body.Close()
+
+	var reply RequestVoteReply
+	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
+		return RequestVoteReply{}, err
+	}
+	return reply, nil
 }
 
 func (t *httpTransport) AppendEntries(ctx context.Context, addr string, args AppendEntriesArgs) (AppendEntriesReply, error) {
-	reply, err := postJSON[AppendEntriesReply](t, ctx, addr, "/raft/append-entries", args)
+	resp, err := postJSON(t, ctx, addr, appendEntriesPath, args)
 	if err != nil {
 		return AppendEntriesReply{}, err
 	}
-	return *reply, nil
+	defer resp.Body.Close()
+
+	var reply AppendEntriesReply
+	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
+		return AppendEntriesReply{}, err
+	}
+	return reply, nil
 }
 
 // applyStore is the local key/value store that followers update on replication.
@@ -251,11 +263,13 @@ func (n *Node) Term() int64 {
 	return n.currTerm
 }
 
+// randomTimeout returns an election timeout in [min, max).
 func randomTimeout(min, max time.Duration) time.Duration {
 	return min + time.Duration(rand.Int63n(int64(max-min)))
 }
 
-// runElectionTimer continuously checks if the leader heartbeat has timed out.
+// runElectionTimer waits for an election timeout and starts elections when the
+// node has not heard from a leader recently.
 func (n *Node) runElectionTimer() {
 	defer n.wg.Done()
 
@@ -269,8 +283,7 @@ func (n *Node) runElectionTimer() {
 		}
 
 		n.mu.Lock()
-		// RULE: Only Followers and Candidates start elections when their timer expires.
-		// Leaders never run election timers because they are the authority.
+		// Leaders are the authority and must never start an election.
 		if n.role != StateLeader && time.Since(n.lastHeartbeat) >= timeout {
 			n.log().Info("election timeout elapsed, starting election", "node", n.cfg.ID, "term", n.currTerm+1)
 			n.startElection()
@@ -279,13 +292,11 @@ func (n *Node) runElectionTimer() {
 	}
 }
 
-// startElection transitions the node to Candidate and requests votes from peers.
-// Assumes n.mu is already locked by the caller.
+// startElection transitions the node to Candidate, then requests votes from
+// every peer. The caller must hold n.mu.
 func (n *Node) startElection() {
-	// RULE: On conversion to candidate, start election:
-	// 1. Increment currentTerm
-	// 2. Vote for self
-	// 3. Reset election timer
+	// Becoming a candidate increments the term, votes for this node, and
+	// resets the election timer.
 	n.role = StateCandidate
 	n.currTerm++
 	n.votedFor = n.cfg.ID
@@ -293,43 +304,41 @@ func (n *Node) startElection() {
 
 	votes := 1
 	term := n.currTerm
-	peers := n.cfg.Peers
+	peers := append([]string(nil), n.cfg.Peers...)
 
 	// If there are no peers (single node cluster), become leader immediately.
 	if len(peers) == 0 {
+		n.log().Info("single node cluster: elected self as leader", "node", n.cfg.ID, "term", n.currTerm)
 		n.role = StateLeader
 		n.leaderID = n.cfg.ID
-		n.log().Info("single node cluster: elected self as leader", "node", n.cfg.ID, "term", n.currTerm)
 		go n.runHeartbeats()
 		return
 	}
 
-	// RULE: Send RequestVote RPCs to all other servers in parallel.
+	// Request votes concurrently so one slow or unavailable peer cannot block
+	// the rest of the election.
 	for _, peer := range peers {
 		go func(addr string) {
-			args := RequestVoteArgs{
+			reply, err := n.transport.RequestVote(n.ctx, addr, RequestVoteArgs{
 				Term:        term,
 				CandidateID: n.cfg.ID,
-			}
-			reply, err := n.transport.RequestVote(n.ctx, addr, args)
+			})
 			if err != nil {
-				return // Peer may be unreachable or offline
+				return
 			}
 
 			n.mu.Lock()
 			defer n.mu.Unlock()
 
-			// RULE: If RPC response contains term T > currentTerm, step down to Follower.
 			if reply.Term > n.currTerm {
 				n.stepDown(reply.Term, "RequestVote reply")
 				return
 			}
 
-			// RULE: If votes received from majority of servers: become leader.
 			if reply.VoteGranted && n.role == StateCandidate && n.currTerm == term {
 				votes++
-				majority := (len(n.cfg.Peers)+1)/2 + 1
-				if votes >= majority {
+				// A majority is more than half of all nodes, including this node.
+				if votes >= (len(n.cfg.Peers)+1)/2+1 {
 					n.log().Info("majority votes achieved, elected leader!", "node", n.cfg.ID, "term", n.currTerm, "votes", votes)
 					n.role = StateLeader
 					n.leaderID = n.cfg.ID
@@ -341,7 +350,6 @@ func (n *Node) startElection() {
 }
 
 // stepDown records a higher term seen in a peer reply and reverts to Follower.
-// Assumes n.mu is already locked by the caller.
 func (n *Node) stepDown(peerTerm int64, source string) {
 	n.log().Info("discovered higher term in "+source+", stepping down", "current", n.currTerm, "peer_term", peerTerm)
 	n.currTerm = peerTerm
@@ -354,33 +362,24 @@ func (n *Node) HandleRequestVote(args RequestVoteArgs) RequestVoteReply {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	reply := RequestVoteReply{
-		Term:        n.currTerm,
-		VoteGranted: false,
-	}
-
-	// RULE 1: Reply false if term < currentTerm.
 	if args.Term < n.currTerm {
-		return reply
+		return RequestVoteReply{Term: n.currTerm}
 	}
 
-	// RULE 2: If term > currentTerm, update currentTerm and transition to Follower.
 	if args.Term > n.currTerm {
 		n.currTerm = args.Term
 		n.role = StateFollower
 		n.votedFor = ""
 	}
 
-	// RULE 3: If votedFor is null or candidateId, grant vote and reset election timer.
-	if n.votedFor == "" || n.votedFor == args.CandidateID {
-		n.votedFor = args.CandidateID
-		n.lastHeartbeat = time.Now()
-		reply.VoteGranted = true
-		n.log().Info("granted vote to candidate", "voter", n.cfg.ID, "candidate", args.CandidateID, "term", args.Term)
+	if n.votedFor != "" && n.votedFor != args.CandidateID {
+		return RequestVoteReply{Term: n.currTerm}
 	}
 
-	reply.Term = n.currTerm
-	return reply
+	n.votedFor = args.CandidateID
+	n.lastHeartbeat = time.Now()
+	n.log().Info("granted vote to candidate", "voter", n.cfg.ID, "candidate", args.CandidateID, "term", args.Term)
+	return RequestVoteReply{Term: n.currTerm, VoteGranted: true}
 }
 
 // runHeartbeats sends periodic heartbeats to all peers while this node is Leader.
@@ -394,13 +393,12 @@ func (n *Node) runHeartbeats() {
 			return
 		case <-ticker.C:
 			n.mu.Lock()
-			// If leadership was lost, terminate the heartbeat loop.
 			if n.role != StateLeader {
 				n.mu.Unlock()
 				return
 			}
 			term := n.currTerm
-			peers := n.cfg.Peers
+			peers := append([]string(nil), n.cfg.Peers...)
 			n.mu.Unlock()
 
 			// Broadcast heartbeat to all peers in parallel.
@@ -412,13 +410,12 @@ func (n *Node) runHeartbeats() {
 					}
 					reply, err := n.transport.AppendEntries(n.ctx, addr, args)
 					if err != nil {
-						return // Peer might be offline
+						return
 					}
 
 					n.mu.Lock()
 					defer n.mu.Unlock()
 
-					// RULE: If peer returns a higher term, step down to Follower immediately.
 					if reply.Term > n.currTerm {
 						n.stepDown(reply.Term, "heartbeat reply")
 					}
@@ -433,17 +430,10 @@ func (n *Node) HandleAppendEntries(args AppendEntriesArgs) AppendEntriesReply {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	reply := AppendEntriesReply{
-		Term:    n.currTerm,
-		Success: false,
-	}
-
-	// RULE 1: Reply false if term < currentTerm.
 	if args.Term < n.currTerm {
-		return reply
+		return AppendEntriesReply{Term: n.currTerm}
 	}
 
-	// RULE 2: If term > currentTerm or we were a candidate, step down to Follower.
 	if args.Term > n.currTerm || n.role != StateFollower {
 		n.currTerm = args.Term
 		n.role = StateFollower
@@ -451,16 +441,12 @@ func (n *Node) HandleAppendEntries(args AppendEntriesArgs) AppendEntriesReply {
 	}
 	n.leaderID = args.LeaderID
 
-	// RULE 3: Valid heartbeat received from current leader, reset election countdown timer.
 	n.lastHeartbeat = time.Now()
 
-	// RULE 4: If entries is not empty, apply each entry to our local store!
 	if n.store != nil && len(args.Entries) > 0 {
 		n.applyEntries(args.Entries)
 	}
-	reply.Success = true
-	reply.Term = n.currTerm
-	return reply
+	return AppendEntriesReply{Term: n.currTerm, Success: true}
 }
 
 // applyEntries applies replicated WAL entries to the local store.
@@ -479,17 +465,16 @@ func (n *Node) applyEntries(entries []WALEntry) {
 func (n *Node) ReplicateEntry(entry WALEntry) {
 	n.mu.Lock()
 	term := n.currTerm
-	peers := n.cfg.Peers
+	peers := append([]string(nil), n.cfg.Peers...)
 	n.mu.Unlock()
 
 	for _, peer := range peers {
 		go func(addr string) {
-			args := AppendEntriesArgs{
-				Term:     term,
+			_, _ = n.transport.AppendEntries(n.ctx, addr, AppendEntriesArgs{
 				LeaderID: n.cfg.ID,
+				Term:     term,
 				Entries:  []WALEntry{entry},
-			}
-			_, _ = n.transport.AppendEntries(n.ctx, addr, args)
+			})
 		}(peer)
 	}
 }

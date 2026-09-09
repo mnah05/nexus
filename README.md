@@ -44,4 +44,4 @@ Run tests directly with:
 go test -v -race ./...
 ```
 
-See the [architecture](docs/architecture.md), [Raft guide](docs/raft-election.md), and [consensus roadmap](docs/raft-roadmap.md) for more detail.
+See the [architecture](docs/architecture.md), [Raft guide](docs/raft-election.md), [raft code map](docs/raft.md), and [consensus roadmap](docs/raft-roadmap.md) for more detail.
