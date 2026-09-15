@@ -21,6 +21,9 @@ leader checks gate the mutation routes.
 | GET    | `/raft/status`      | `raftNode.Status()` snapshot | — |
 | POST   | `/raft/request-vote` | `raftNode.HandleRequestVote` | 400 bad JSON |
 | POST   | `/raft/append-entries` | `raftNode.HandleAppendEntries` | 400 bad JSON |
+| GET    | `/healthz`          | health response    | — |
+| GET    | `/readyz`           | checks `kv.Closed` | 503 while shutting down |
+| GET    | `/metrics`          | `GlobalMetrics.Summary` | — |
 
 In cluster mode `/set`, `/del`, and `/snapshot` require leadership: a
 follower answers `403` with `{"error":"not leader","leader":"<addr>"}`
@@ -34,6 +37,7 @@ and the leader broadcasts each mutation via `raftNode.ReplicateEntry`.
 - `/list` responds `application/json`.
 - Interval config uses seconds (`interval_secs`); `0` disables the
   automatic snapshot goroutine entirely.
+- `/get` always responds with JSON (`{"key":..., "val":...}`).
 
 ## Why chi
 

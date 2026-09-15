@@ -89,7 +89,7 @@ Point-in-time persistence of the full map as JSON.
 
 ### `internal/http.go`
 chi router exposing the API: `/get`, `/list`, `/set`, `/del`,
-`/snapshot`, and `/config/snapshot` (GET/POST), plus the Raft endpoints
+`/snapshot`, and `POST /config/snapshot`, plus the Raft endpoints
 `/raft/status`, `/raft/request-vote`, and `/raft/append-entries` when a
 `*Node` is wired in. Handlers are thin — they decode input, call KV/raft,
 and map errors to status codes.

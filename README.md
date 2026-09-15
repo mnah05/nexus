@@ -32,8 +32,11 @@ make docker-down
 | `GET` | `/list` | List all values |
 | `POST` | `/set` | Replicated leader write |
 | `POST` | `/del` | Replicated leader delete |
+| `POST` | `/snapshot` | Persist state and compact the WAL |
+| `POST` | `/config/snapshot` | Set the automatic snapshot interval |
 | `GET` | `/raft/status` | Raft state and leader |
 | `GET` | `/healthz` | Health check |
+| `GET` | `/readyz` | Readiness check |
 | `GET` | `/metrics` | Operational metrics |
 
 ## Development
