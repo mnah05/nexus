@@ -85,5 +85,8 @@ acquisitions that could disagree.
 
 `HandleRequestVote`, `HandleAppendEntries`, and `ReplicateEntry` keep the
 external RPC surface used by the HTTP layer (`internal/http.go`).
-`ReplicateEntry` remains intentionally fire-and-forget: entries are broadcast
-in parallel and replies are ignored.
+`ReplicateEntry` serializes proposals, sends each entry to peers, and only
+commits/applies it after a majority acknowledges it. The HTTP write handlers
+return success only after that commitment. Heartbeats carry the leader's
+commit index and the previous log position, but this teaching implementation
+does not automatically resynchronize nodes that missed entries.

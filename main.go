@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"mnah/nexus/internal"
+	"mnah/nexus/internal/raft"
 )
 
 func replaceEnv(existing []string, updates map[string]string) []string {
@@ -83,7 +84,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var raftNode *internal.Node
+	var raftNode *raft.RaftNode
 	if nodeID != "" || peersStr != "" {
 		if nodeID == "" {
 			nodeID = "localhost:" + port
@@ -98,8 +99,8 @@ func main() {
 			}
 		}
 		slog.Info("starting in Raft cluster mode", "node_id", nodeID, "peers", peers)
-		cfg := internal.DefaultConfig(nodeID, peers)
-		raftNode = internal.New(cfg, internal.NewHTTPTransport(cfg.HTTPTimeout), kv)
+		cfg := raft.DefaultRaftConfig(nodeID, peers)
+		raftNode = raft.NewNode(context.Background(), nodeID, peers, kv, raft.NewHTTPTransport(cfg.RequestTimeout))
 		go raftNode.Run()
 	}
 

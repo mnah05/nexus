@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"mnah/nexus/internal/raft"
 )
 
 func setupTestServer(t *testing.T) (*KV, http.Handler) {
@@ -332,14 +336,16 @@ func TestRaftHTTPFollowerRejectionAndLeaderAcceptance(t *testing.T) {
 	}
 	defer kv.Close()
 
-	// Create node as Follower with known leader "node-1:8001"
-	node := newTestNode("node-2:8002", []string{"node-1:8001"}, kv)
+	// Create a practice Raft node as a follower with a known leader.
+	node := raft.NewNode(context.Background(), "node-2:8002", []string{"node-1:8001"}, kv, nil)
 	defer node.Close()
 
-	node.mu.Lock()
-	node.role = StateFollower
-	node.leaderID = "node-1:8001"
-	node.mu.Unlock()
+	if _, err := node.HandleAppendEntries(context.Background(), raft.AppendArgs{
+		Term:     1,
+		LeaderID: "node-1:8001",
+	}); err != nil {
+		t.Fatalf("failed to establish follower state: %v", err)
+	}
 
 	router := NewRouter(kv, node)
 
@@ -369,10 +375,18 @@ func TestRaftHTTPFollowerRejectionAndLeaderAcceptance(t *testing.T) {
 		t.Fatalf("unexpected rejection payload: %+v", errResp)
 	}
 
-	// 3. Promote node to Leader and verify POST /set succeeds!
-	node.mu.Lock()
-	node.role = StateLeader
-	node.mu.Unlock()
+	// 3. Convert this to a single-node cluster and let it elect itself.
+	node.Config.Peers = nil
+	node.Config.ElectionMinTime = time.Millisecond
+	node.Config.ElectionMaxTime = 2 * time.Millisecond
+	go node.Run()
+	deadline := time.Now().Add(time.Second)
+	for !node.IsLeader() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !node.IsLeader() {
+		t.Fatal("node did not become leader")
+	}
 
 	req = httptest.NewRequest(http.MethodPost, "/set", bytes.NewBufferString(setBody))
 	req.Header.Set("Content-Type", "application/json")

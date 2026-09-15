@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"mnah/nexus/internal/raft"
 	"mnah/nexus/web"
 )
 
@@ -96,7 +97,7 @@ func CORSMiddleware(next http.Handler) http.Handler {
 }
 
 // NewRouter wires the HTTP API backed by the KV service and optional Raft node.
-func NewRouter(kv *KV, raftNode *Node) http.Handler {
+func NewRouter(kv *KV, raftNode *raft.RaftNode) http.Handler {
 	r := chi.NewRouter()
 
 	// Core middlewares
@@ -175,23 +176,31 @@ func NewRouter(kv *KV, raftNode *Node) http.Handler {
 
 		// POST /raft/request-vote handles incoming vote requests from candidates
 		r.Post("/raft/request-vote", func(w http.ResponseWriter, r *http.Request) {
-			var args RequestVoteArgs
+			var args raft.RequestArgs
 			if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
 				writeError(w, http.StatusBadRequest, "bad json: "+err.Error())
 				return
 			}
-			reply := raftNode.HandleRequestVote(args)
+			reply, err := raftNode.HandleRequestVote(r.Context(), args)
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, err.Error())
+				return
+			}
 			writeJSON(w, http.StatusOK, reply)
 		})
 
 		// POST /raft/append-entries handles incoming heartbeats from the leader
 		r.Post("/raft/append-entries", func(w http.ResponseWriter, r *http.Request) {
-			var args AppendEntriesArgs
+			var args raft.AppendArgs
 			if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
 				writeError(w, http.StatusBadRequest, "bad json: "+err.Error())
 				return
 			}
-			reply := raftNode.HandleAppendEntries(args)
+			reply, err := raftNode.HandleAppendEntries(r.Context(), args)
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, err.Error())
+				return
+			}
 			writeJSON(w, http.StatusOK, reply)
 		})
 	}
@@ -327,20 +336,28 @@ func NewRouter(kv *KV, raftNode *Node) http.Handler {
 			return
 		}
 
-		idx, err := kv.Set(req.Key, req.Val)
+		var idx uint64
+		var err error
+		if raftNode != nil {
+			idx, err = raftNode.ReplicateEntry(r.Context(), raft.WALEntry{
+				Op:  raft.OpSet,
+				Key: req.Key,
+				Val: req.Val,
+			})
+		} else {
+			idx, err = kv.Set(req.Key, req.Val)
+		}
 		if err != nil {
+			if err == raft.ErrNotLeader {
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": "not leader", "leader": raftNode.LeaderID()})
+				return
+			}
+			if err == raft.ErrNoQuorum {
+				writeError(w, http.StatusServiceUnavailable, err.Error())
+				return
+			}
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
-		}
-
-		if raftNode != nil {
-			raftNode.ReplicateEntry(WALEntry{
-				Idx:  idx,
-				Op:   OpSet,
-				Term: int(raftNode.Term()),
-				Key:  req.Key,
-				Val:  req.Val,
-			})
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -376,19 +393,27 @@ func NewRouter(kv *KV, raftNode *Node) http.Handler {
 			return
 		}
 
-		idx, err := kv.Del(req.Key)
+		var idx uint64
+		var err error
+		if raftNode != nil {
+			idx, err = raftNode.ReplicateEntry(r.Context(), raft.WALEntry{
+				Op:  raft.OpDel,
+				Key: req.Key,
+			})
+		} else {
+			idx, err = kv.Del(req.Key)
+		}
 		if err != nil {
+			if err == raft.ErrNotLeader {
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": "not leader", "leader": raftNode.LeaderID()})
+				return
+			}
+			if err == raft.ErrNoQuorum {
+				writeError(w, http.StatusServiceUnavailable, err.Error())
+				return
+			}
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
-		}
-
-		if raftNode != nil {
-			raftNode.ReplicateEntry(WALEntry{
-				Idx:  idx,
-				Op:   OpDel,
-				Term: int(raftNode.Term()),
-				Key:  req.Key,
-			})
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{

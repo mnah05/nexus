@@ -26,6 +26,7 @@ This roadmap tracks the design and milestone delivery for Raft consensus, durabi
   - [x] Leader replicates mutations (`POST /set`, `POST /del`) inside `AppendEntriesArgs.Entries`.
   - [x] Followers write replicated entries to their local WAL and apply to memory.
   - [x] Automated failover in ~200ms when leader crashes; revived leader steps down cleanly.
+  - [x] Leader mutations wait for a majority AppendEntries acknowledgement before being committed and applied.
 
 - [x] **Milestone 4: Embedded Web Dashboard & Tooling**
   - [x] Embedded Vanilla HTML/CSS/JS Single Page Application via `embed.FS`.
@@ -38,9 +39,7 @@ This roadmap tracks the design and milestone delivery for Raft consensus, durabi
 
 ## Future Enhancements (Phase 3)
 
-1. **Strict Quorum Commit Gate**:
-   - Delay returning HTTP 200 to client until majority of followers have acknowledged the append RPC.
-2. **InstallSnapshot RPC**:
+1. **InstallSnapshot RPC**:
    - Stream snapshot chunks to lagging nodes that join after WAL truncation.
-3. **Dynamic Cluster Reconfiguration**:
+2. **Dynamic Cluster Reconfiguration**:
    - Joint consensus protocol for dynamically adding/removing nodes at runtime.

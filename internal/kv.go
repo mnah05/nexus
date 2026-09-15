@@ -129,6 +129,29 @@ func (kv *KV) Del(key string) (uint64, error) {
 	return idx, nil
 }
 
+// ApplyRaft persists and applies a committed Raft entry using the Raft index
+// and term rather than allocating unrelated local WAL metadata.
+func (kv *KV) ApplyRaft(op string, idx uint64, term int, key, val string) error {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	if kv.closed {
+		return ErrClosed
+	}
+	if op != "SET" && op != "DEL" {
+		return fmt.Errorf("kv: unknown raft operation %q", op)
+	}
+	if err := kv.wal.AppendAt(idx, OpType(op), term, key, val); err != nil {
+		return err
+	}
+	switch op {
+	case "SET":
+		kv.store.Set(key, val)
+	case "DEL":
+		kv.store.Del(key)
+	}
+	return nil
+}
+
 // Snapshot persists the store to disk without blocking concurrent writes.
 // kv.mu is only held briefly to copy the in-memory map and capture the WAL watermark.
 // The JSON serialization, disk file write, and WAL compaction proceed concurrently with Set/Del.

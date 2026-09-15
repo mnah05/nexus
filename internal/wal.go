@@ -60,6 +60,30 @@ func (w *WAL) Append(op OpType, term int, key, val string) (uint64, error) {
 	return idx, nil
 }
 
+// AppendAt writes an entry with an index assigned by Raft.
+func (w *WAL) AppendAt(idx uint64, op OpType, term int, key, val string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return ErrClosed
+	}
+	if idx == 0 {
+		return errors.New("wal: raft index must be greater than zero")
+	}
+	entry := WALEntry{Idx: idx, Op: op, Term: term, Key: key, Val: val}
+	if err := w.writer.Write(entry.toRecord()); err != nil {
+		return err
+	}
+	w.writer.Flush()
+	if err := w.writer.Error(); err != nil {
+		return err
+	}
+	if idx >= w.nextIdx {
+		w.nextIdx = idx + 1
+	}
+	return nil
+}
+
 // Truncate clears the log file after a snapshot has captured the full state.
 // The entry counter is deliberately NOT reset: WAL indices stay monotonic for
 // the life of the process (and are persisted in the snapshot for restart
