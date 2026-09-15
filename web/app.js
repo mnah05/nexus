@@ -255,7 +255,7 @@
       try {
         await requestNodeAction(port, action);
         logEvent('success', `Node :${port} ${action === 'restart' ? 'is restarting' : 'is shutting down'}.`);
-        notify('success', `Node :${port} ${action}`, action === 'restart' ? 'The node is rejoining the cluster.' : 'The node is leaving the cluster.');
+        notify('success', `Node :${port} ${action}`, action === 'restart' ? 'The node is restarting.' : 'The node is leaving the cluster.');
         setTimeout(refreshAll, 500);
       } catch (err) {
         logEvent('error', `Node :${port} ${label} failed: ${err.message}`);
