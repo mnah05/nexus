@@ -85,22 +85,7 @@ func TestHTTPConsistentJSONResponses(t *testing.T) {
 		t.Fatalf("unexpected get response: %+v", getResp)
 	}
 
-	// 3. GET /get?key=greet&format=raw -> returns raw string for backward compatibility
-	req = httptest.NewRequest(http.MethodGet, "/get?key=greet&format=raw", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK on raw get, got %d", rec.Code)
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/plain") {
-		t.Fatalf("expected text/plain Content-Type, got %s", ct)
-	}
-	if rec.Body.String() != "hello" {
-		t.Fatalf("expected hello, got %q", rec.Body.String())
-	}
-
-	// 4. GET /list -> returns JSON with Content-Type: application/json
+	// 3. GET /list -> returns JSON with Content-Type: application/json
 	req = httptest.NewRequest(http.MethodGet, "/list", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -309,15 +294,7 @@ func TestHTTPObservabilityEndpoints(t *testing.T) {
 		t.Fatalf("metrics missing uptime_seconds: %v", metricsResp)
 	}
 
-	// 5. /debug/pprof/
-	req = httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 on /debug/pprof/, got %d", rec.Code)
-	}
-
-	// 6. Test /readyz returns 503 when KV is closed
+	// Test /readyz returns 503 when KV is closed
 	_ = kv.Close()
 	req = httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec = httptest.NewRecorder()

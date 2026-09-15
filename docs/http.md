@@ -17,7 +17,6 @@ leader checks gate the mutation routes.
 | POST   | `/set`              | `kv.Set`           | 400 bad JSON, 500 WAL failure |
 | POST   | `/del`              | `kv.Del`           | 400 bad JSON, 500 WAL failure |
 | POST   | `/snapshot`         | `kv.Snapshot`      | 500 |
-| GET    | `/config/snapshot`  | reads interval     | — |
 | POST   | `/config/snapshot`  | `kv.SetTiming`     | 400 bad JSON / negative |
 | GET    | `/raft/status`      | `raftNode.Status()` snapshot | — |
 | POST   | `/raft/request-vote` | `raftNode.HandleRequestVote` | 400 bad JSON |

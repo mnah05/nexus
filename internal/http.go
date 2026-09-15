@@ -120,21 +120,12 @@ func NewRouter(kv *KV, raftNode *raft.RaftNode) http.Handler {
 		_, _ = w.Write(indexData)
 	})
 
-	// Profiling endpoints at /debug/pprof
-	r.Mount("/debug", middleware.Profiler())
-
 	// Health check endpoint
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "healthy",
 		})
 	})
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "healthy",
-		})
-	})
-
 	// Readiness check endpoint
 	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if kv != nil && kv.Closed() {
@@ -145,16 +136,6 @@ func NewRouter(kv *KV, raftNode *raft.RaftNode) http.Handler {
 			"status": "ready",
 		})
 	})
-	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
-		if kv != nil && kv.Closed() {
-			writeError(w, http.StatusServiceUnavailable, "service is shutting down")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ready",
-		})
-	})
-
 	// Metrics endpoint (returns JSON operational metrics)
 	r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, GlobalMetrics.Summary(kv))
@@ -220,14 +201,6 @@ func NewRouter(kv *KV, raftNode *raft.RaftNode) http.Handler {
 			return
 		}
 
-		// Backward-compatibility: support ?format=raw or Accept: text/plain
-		if r.URL.Query().Get("format") == "raw" || r.Header.Get("Accept") == "text/plain" {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, val)
-			return
-		}
-
 		writeJSON(w, http.StatusOK, map[string]string{
 			"key": key,
 			"val": val,
@@ -258,14 +231,6 @@ func NewRouter(kv *KV, raftNode *raft.RaftNode) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":      true,
 			"message": "snapshot complete",
-		})
-	})
-
-	// GET /config/snapshot returns the current snapshot interval.
-	r.Get("/config/snapshot", func(w http.ResponseWriter, r *http.Request) {
-		secs := int(kv.Interval() / time.Second)
-		writeJSON(w, http.StatusOK, map[string]int{
-			"interval_secs": secs,
 		})
 	})
 
